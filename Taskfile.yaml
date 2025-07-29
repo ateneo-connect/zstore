@@ -1,0 +1,19 @@
+version: '3'
+
+tasks:
+  build:
+    cmds:
+      - mkdir -p bin && source .env && CGO_ENABLED=0 GOOS=linux go build -a -o bin/zstore ./cmd/server
+
+  test:
+    cmds:
+      - source .env && go test -v ./...
+
+  lint:
+    cmds:
+      - golangci-lint run
+
+  run:
+    cmds:
+      - source .env && ./bin/zstore
+

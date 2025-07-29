@@ -1,0 +1,44 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Output of the Go compiler
+*.o
+*.a
+
+# Vendor directory (when using `go mod vendor`)
+/vendor/
+
+# Binary output from 'go build'
+/bin/
+/build/
+/dist/
+
+# IDE and editor specific files
+# VS Code settings and workspace
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs (Goland, IntelliJ, etc.)
+.idea/
+*.iml
+
+# MacOS files
+.DS_Store
+
+# Node modules (if the project has a frontend or JS dependencies)
+/node_modules/
+
+# Logs
+*.log
+
+# Docker specific files
+docker-compose.override.yml
+.env
+
+# Taskfile logs and temp files
+Taskfile.dist.yml
