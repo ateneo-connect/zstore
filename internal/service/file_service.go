@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 
 	"github.com/zzenonn/zstore/internal/domain"
 )
@@ -56,12 +57,26 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader) e
 	metadata.Prefix = prefix
 	metadata.FileName = filepath.Base(key)
 
-	// Upload each shard
+	// Upload each shard in parallel
+	var wg sync.WaitGroup
+	errorCh := make(chan error, len(shards))
+
 	for i, shard := range shards {
-		shardKey := fmt.Sprintf("%s.shard_%d", key, i)
-		if err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard)); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(i int, shard []byte) {
+			defer wg.Done()
+			shardKey := fmt.Sprintf("%s.shard_%d", key, i)
+			if err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard)); err != nil {
+				errorCh <- err
+			}
+		}(i, shard)
+	}
+
+	wg.Wait()
+	close(errorCh)
+
+	if err := <-errorCh; err != nil {
+		return err
 	}
 
 	// Store metadata
