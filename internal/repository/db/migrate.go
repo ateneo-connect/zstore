@@ -38,13 +38,15 @@ type Migration interface {
 	TableName() string
 }
 
+// Global migrations list in order
+var migrations = []Migration{
+	&migrate.CreateUsersTable{},         // Existing migration
+	&migrate.CreateObjectMetadataTable{}, // New ObjectMetadata table migration
+}
+
 func (d *DynamoDb) MigrateDb(ctx context.Context) error {
 	log.Info("migrating database")
 
-	// Define migrations in order
-	migrations := []Migration{
-		&migrate.CreateUsersTable{}, // Add more migrations here
-	}
 	for _, migration := range migrations {
 		// Check if migration was already applied
 		if applied, err := d.isMigrationApplied(ctx, migration.Version()); err != nil {
@@ -68,6 +70,37 @@ func (d *DynamoDb) MigrateDb(ctx context.Context) error {
 	}
 
 	log.Info("successfully migrated the database")
+	return nil
+}
+
+func (d *DynamoDb) MigrateDown(ctx context.Context) error {
+	log.Info("rolling back database migrations")
+
+	// Iterate migrations from bottom up (reverse order)
+	for i := len(migrations) - 1; i >= 0; i-- {
+		migration := migrations[i]
+		// Check if migration was applied
+		if applied, err := d.isMigrationApplied(ctx, migration.Version()); err != nil {
+			return fmt.Errorf("could not check migration status: %w", err)
+		} else if !applied {
+			log.Infof("skipping rollback %s: not applied", migration.Version())
+			continue
+		}
+
+		// Apply down migration
+		if err := migration.Down(ctx, d.Client); err != nil {
+			return fmt.Errorf("could not rollback migration %s: %w", migration.Version(), err)
+		}
+
+		// Remove migration tag
+		if err := d.removeMigrationRecord(ctx, migration.TableName()); err != nil {
+			return fmt.Errorf("could not remove migration record %s: %w", migration.Version(), err)
+		}
+
+		log.Infof("successfully rolled back migration %s", migration.Version())
+	}
+
+	log.Info("successfully rolled back database migrations")
 	return nil
 }
 
@@ -113,6 +146,31 @@ func (d *DynamoDb) recordMigration(ctx context.Context, version string, tableNam
 	_, err = d.TaggingClient.TagResources(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to tag resource: %w", err)
+	}
+
+	return nil
+}
+
+func (d *DynamoDb) removeMigrationRecord(ctx context.Context, tableName string) error {
+	// Get table ARN
+	describeInput := &dynamodb.DescribeTableInput{
+		TableName: aws.String(tableName),
+	}
+
+	tableDesc, err := d.Client.DescribeTable(ctx, describeInput)
+	if err != nil {
+		return fmt.Errorf("failed to get table ARN: %w", err)
+	}
+
+	// Remove migration tags
+	input := &resourcegroupstaggingapi.UntagResourcesInput{
+		ResourceARNList: []string{*tableDesc.Table.TableArn},
+		TagKeys:         []string{"Migration", "MigratedAt"},
+	}
+
+	_, err = d.TaggingClient.UntagResources(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to untag resource: %w", err)
 	}
 
 	return nil

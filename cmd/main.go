@@ -50,6 +50,25 @@ var initCmd = &cobra.Command{
 	},
 }
 
+var downCmd = &cobra.Command{
+	Use:   "down",
+	Short: "Roll back database migrations",
+	Run: func(cmd *cobra.Command, args []string) {
+		dynamoDb, err := db.NewDatabase(cfg)
+		if err != nil {
+			fmt.Printf("Failed to connect to the database: %v\n", err)
+			return
+		}
+
+		if err := dynamoDb.MigrateDown(context.Background()); err != nil {
+			fmt.Printf("Failed to roll back migrations: %v\n", err)
+			return
+		}
+
+		fmt.Println("Database migrations rolled back successfully")
+	},
+}
+
 func initConfig() {
 	var err error
 	cfg, err = config.LoadConfig()
@@ -76,6 +95,7 @@ func initConfig() {
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(downCmd)
 }
 
 func main() {
