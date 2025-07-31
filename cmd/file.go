@@ -24,9 +24,7 @@ var uploadCmd = &cobra.Command{
 			return
 		}
 		key := strings.TrimPrefix(zsURL, "zs://")
-		if idx := strings.Index(key, "/"); idx != -1 {
-			key = key[idx+1:] // Remove bucket name, keep prefix/object
-		}
+		// Keep bucket name as part of the prefix
 		
 		file, err := os.Open(filePath)
 		if err != nil {
@@ -57,9 +55,7 @@ var downloadCmd = &cobra.Command{
 			return
 		}
 		key := strings.TrimPrefix(zsURL, "zs://")
-		if idx := strings.Index(key, "/"); idx != -1 {
-			key = key[idx+1:] // Remove bucket name, keep prefix/object
-		}
+		// Keep bucket name as part of the prefix
 		
 		reader, err := fileService.DownloadFile(context.Background(), key)
 		if err != nil {
@@ -104,9 +100,7 @@ var deleteCmd = &cobra.Command{
 			return
 		}
 		key := strings.TrimPrefix(zsURL, "zs://")
-		if idx := strings.Index(key, "/"); idx != -1 {
-			key = key[idx+1:] // Remove bucket name, keep prefix/object
-		}
+		// Keep bucket name as part of the prefix
 		
 		err := fileService.DeleteFile(context.Background(), key)
 		if err != nil {

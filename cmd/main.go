@@ -17,7 +17,6 @@ import (
 
 var (
 	cfg         *config.Config
-	userService *service.UserService
 	fileService *service.FileService
 )
 
@@ -85,12 +84,10 @@ func initConfig() {
 	}
 
 	// Initialize services
-	userRepository := db.NewUserRepository(dynamoDb.Client, cfg.DynamoDBTable)
-	userService = service.NewUserService(&userRepository)
-
 	s3Store := objectstore.NewS3ObjectStore(cfg)
 	s3ObjectRepository := objectstore.NewS3ObjectRepository(s3Store.Client, cfg.S3BucketName)
-	fileService = service.NewFileService(&s3ObjectRepository)
+	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
+	fileService = service.NewFileService(&s3ObjectRepository, &metadataRepository)
 }
 
 func init() {

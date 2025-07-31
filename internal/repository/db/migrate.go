@@ -40,7 +40,6 @@ type Migration interface {
 
 // Global migrations list in order
 var migrations = []Migration{
-	&migrate.CreateUsersTable{},         // Existing migration
 	&migrate.CreateObjectMetadataTable{}, // New ObjectMetadata table migration
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zzenonn/zstore/internal/domain"
 	"github.com/zzenonn/zstore/internal/service"
 )
 
@@ -19,6 +20,22 @@ type mockS3ObjectRepository struct {
 	downloadFunc func(ctx context.Context, key string) (io.ReadCloser, error)
 	deleteFunc   func(ctx context.Context, key string) error
 	storage      map[string][]byte
+}
+
+// mockMetadataRepository is a mock implementation of metadata repository for testing.
+type mockMetadataRepository struct {
+	createFunc func(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error)
+}
+
+func newMockMetadataRepository() *mockMetadataRepository {
+	return &mockMetadataRepository{}
+}
+
+func (m *mockMetadataRepository) CreateMetadata(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error) {
+	if m.createFunc != nil {
+		return m.createFunc(ctx, metadata)
+	}
+	return metadata, nil
 }
 
 func newMockS3ObjectRepository() *mockS3ObjectRepository {
@@ -81,7 +98,8 @@ func TestFileService_UploadFile(t *testing.T) {
 				},
 			}
 
-			fs := service.NewFileService(mockRepo)
+			mockMetaRepo := newMockMetadataRepository()
+			fs := service.NewFileService(mockRepo, mockMetaRepo)
 			reader := strings.NewReader(tt.content)
 
 			err := fs.UploadFile(context.Background(), tt.key, reader)
@@ -126,7 +144,8 @@ func TestFileService_DownloadFile(t *testing.T) {
 				},
 			}
 
-			fs := service.NewFileService(mockRepo)
+			mockMetaRepo := newMockMetadataRepository()
+			fs := service.NewFileService(mockRepo, mockMetaRepo)
 
 			reader, err := fs.DownloadFile(context.Background(), tt.key)
 
@@ -168,7 +187,8 @@ func TestFileService_DeleteVerification(t *testing.T) {
 		return nil
 	}
 
-	fs := service.NewFileService(mockRepo)
+	mockMetaRepo := newMockMetadataRepository()
+	fs := service.NewFileService(mockRepo, mockMetaRepo)
 
 	// Upload file
 	reader := strings.NewReader(content)
@@ -222,7 +242,8 @@ func TestFileService_SmallFileUploadDownload(t *testing.T) {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 
-	fs := service.NewFileService(mockRepo)
+	mockMetaRepo := newMockMetadataRepository()
+	fs := service.NewFileService(mockRepo, mockMetaRepo)
 
 	// Upload
 	reader := strings.NewReader(content)
@@ -280,7 +301,8 @@ func TestFileService_LargeFileUploadDownload(t *testing.T) {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 
-	fs := service.NewFileService(mockRepo)
+	mockMetaRepo := newMockMetadataRepository()
+	fs := service.NewFileService(mockRepo, mockMetaRepo)
 	key := "test/large-file.bin"
 
 	// Upload the large file
