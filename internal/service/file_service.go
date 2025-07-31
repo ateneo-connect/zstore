@@ -12,7 +12,7 @@ import (
 )
 
 type S3ObjectRepository interface {
-	Upload(ctx context.Context, key string, r io.Reader) error
+	Upload(ctx context.Context, key string, r io.Reader, quiet bool) error
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
 }
@@ -35,7 +35,7 @@ func NewFileService(repo S3ObjectRepository, metadataRepo MetadataRepository) *F
 }
 
 // UploadFile uploads a file to S3
-func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader) error {
+func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool) error {
 
 	// Read file data
 	data, err := io.ReadAll(r)
@@ -66,7 +66,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader) e
 		go func(i int, shard []byte) {
 			defer wg.Done()
 			shardKey := fmt.Sprintf("%s.shard_%d", key, i)
-			if err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard)); err != nil {
+			if err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet); err != nil {
 				errorCh <- err
 			}
 		}(i, shard)

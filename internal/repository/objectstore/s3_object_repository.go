@@ -24,7 +24,7 @@ func NewS3ObjectRepository(client *s3.Client, bucketName string) S3ObjectReposit
 }
 
 // Upload uploads an object file to S3
-func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.Reader) error {
+func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.Reader, quiet bool) error {
 	seeker, ok := reader.(io.Seeker)
 	var size int64 = -1
 	if ok {
@@ -36,13 +36,17 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 		}
 	}
 	
-	bar := progressbar.DefaultBytes(size, "uploading")
-	proxyReader := progressbar.NewReader(reader, bar)
+	var proxyReader io.Reader = reader
+	if !quiet {
+		bar := progressbar.DefaultBytes(size, "uploading")
+		pbReader := progressbar.NewReader(reader, bar)
+		proxyReader = &pbReader
+	}
 	
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
-		Body:   &proxyReader,
+		Body:   proxyReader,
 	}
 	if size > 0 {
 		input.ContentLength = &size

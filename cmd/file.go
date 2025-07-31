@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var quiet bool
+
 var uploadCmd = &cobra.Command{
 	Use:   "upload [file-path] [zs://bucket/prefix/object]",
 	Short: "Upload a file to S3",
@@ -33,7 +35,8 @@ var uploadCmd = &cobra.Command{
 		}
 		defer file.Close()
 
-		err = fileService.UploadFile(context.Background(), key, file)
+		quiet, _ := cmd.Flags().GetBool("quiet")
+		err = fileService.UploadFile(context.Background(), key, file, quiet)
 		if err != nil {
 			fmt.Printf("Error uploading file: %v\n", err)
 			return
@@ -112,6 +115,7 @@ var deleteCmd = &cobra.Command{
 }
 
 func init() {
+	uploadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(deleteCmd)

@@ -44,7 +44,7 @@ func newMockS3ObjectRepository() *mockS3ObjectRepository {
 	}
 }
 
-func (m *mockS3ObjectRepository) Upload(ctx context.Context, key string, r io.Reader) error {
+func (m *mockS3ObjectRepository) Upload(ctx context.Context, key string, r io.Reader, quiet bool) error {
 	if m.uploadFunc != nil {
 		return m.uploadFunc(ctx, key, r)
 	}
@@ -102,7 +102,7 @@ func TestFileService_UploadFile(t *testing.T) {
 			fs := service.NewFileService(mockRepo, mockMetaRepo)
 			reader := strings.NewReader(tt.content)
 
-			err := fs.UploadFile(context.Background(), tt.key, reader)
+			err := fs.UploadFile(context.Background(), tt.key, reader, false)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("UploadFile() error = %v, wantErr %v", err, tt.wantErr)
@@ -192,7 +192,7 @@ func TestFileService_DeleteVerification(t *testing.T) {
 
 	// Upload file
 	reader := strings.NewReader(content)
-	err := fs.UploadFile(context.Background(), key, reader)
+	err := fs.UploadFile(context.Background(), key, reader, false)
 	if err != nil {
 		t.Fatalf("UploadFile() failed: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestFileService_SmallFileUploadDownload(t *testing.T) {
 
 	// Upload
 	reader := strings.NewReader(content)
-	err := fs.UploadFile(context.Background(), key, reader)
+	err := fs.UploadFile(context.Background(), key, reader, false)
 	if err != nil {
 		t.Fatalf("UploadFile() failed: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestFileService_LargeFileUploadDownload(t *testing.T) {
 
 	// Upload the large file
 	reader := bytes.NewReader(originalData)
-	err = fs.UploadFile(context.Background(), key, reader)
+	err = fs.UploadFile(context.Background(), key, reader, false)
 	if err != nil {
 		t.Fatalf("UploadFile() failed: %v", err)
 	}
