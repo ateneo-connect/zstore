@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"path/filepath"
 
@@ -34,25 +36,36 @@ func NewFileService(repo S3ObjectRepository, metadataRepo MetadataRepository) *F
 // UploadFile uploads a file to S3
 func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader) error {
 
-	// Create metadata with mock data
-	prefix := filepath.Dir(key)
-	if prefix == "." {
-		prefix = ""
-	}
-	fileName := filepath.Base(key)
-
-	metadata := domain.ObjectMetadata{
-		Prefix:       prefix,
-		FileName:     fileName,
-		OriginalSize: 1024000,                                      // Mock: 1MB
-		ShardSize:    128000,                                       // Mock: 128KB
-		ShardHashes:  []string{"hash1", "hash2", "hash3", "hash4"}, // Mock hashes
-	}
-	_, err := s.metadataRepo.CreateMetadata(ctx, metadata)
-
-	if err := s.repo.Upload(ctx, key, r); err != nil {
+	// Read file data
+	data, err := io.ReadAll(r)
+	if err != nil {
 		return err
 	}
+
+	// Create shards using erasure coding
+	metadata, shards, err := ShardFile(data, 4, 2) // 2 data shards, 2 parity shards
+	if err != nil {
+		return err
+	}
+
+	// Set prefix and filename for metadata
+	prefix := filepath.Dir(key)
+	if prefix == "." {
+		prefix = "root"
+	}
+	metadata.Prefix = prefix
+	metadata.FileName = filepath.Base(key)
+
+	// Upload each shard
+	for i, shard := range shards {
+		shardKey := fmt.Sprintf("%s.shard_%d", key, i)
+		if err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard)); err != nil {
+			return err
+		}
+	}
+
+	// Store metadata
+	_, err = s.metadataRepo.CreateMetadata(ctx, metadata)
 	return err
 }
 

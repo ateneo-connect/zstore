@@ -6,5 +6,6 @@ type ObjectMetadata struct {
 	FileName     string   `json:"file_name" dynamodbav:"file_name"`     // Filename - Sort Key
 	OriginalSize int64    `json:"original_size" dynamodbav:"original_size"`
 	ShardSize    int64    `json:"shard_size" dynamodbav:"shard_size"`
+	ParityShards int      `json:"parity_shards" dynamodbav:"parity_shards"`
 	ShardHashes  []string `json:"shard_hashes" dynamodbav:"shard_hashes"` // Ordered array of CRC64 hashes
 }
