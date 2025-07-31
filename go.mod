@@ -9,14 +9,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.42.1
 	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.26.2
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.58.1
-	github.com/chi-middleware/logrus-logger v0.3.0
-	github.com/go-chi/chi/v5 v5.1.0
-	github.com/go-chi/cors v1.2.1
-	github.com/go-playground/validator/v10 v10.22.0
-	github.com/golang-jwt/jwt/v5 v5.2.1
+	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
-	github.com/stretchr/testify v1.9.0
 	golang.org/x/crypto v0.27.0
 )
 
@@ -26,7 +21,10 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.7.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.18.15 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.6 // indirect
+	golang.org/x/term v0.28.0 // indirect
 )
 
 require (
@@ -44,15 +42,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.30.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.33.18 // indirect
 	github.com/aws/smithy-go v1.22.2 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
-	github.com/go-playground/locales v0.14.1 // indirect
-	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
-	golang.org/x/net v0.27.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
-	golang.org/x/text v0.18.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	golang.org/x/sys v0.29.0 // indirect
 )

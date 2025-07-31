@@ -11,8 +11,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/zzenonn/zstore/internal/integration"
 )
 
 // Config holds the application configuration
@@ -49,53 +47,7 @@ func LoadConfig() (*Config, error) {
 		S3BucketName:  getEnv("S3_BUCKET_NAME", "default-bucket"),
 	}
 
-	// Fetch the ECDSA keys from AWS Secret Manager
-	err = config.loadECDSAKeys(cfg)
-	if err != nil {
-		return nil, err
-	}
-
 	return config, nil
-}
-
-// loadECDSAKeys retrieves the ECDSA private and public keys from Secret Manager
-func (c *Config) loadECDSAKeys(cfg aws.Config) error {
-	secretManagerService, err := integration.NewAWSSSMService(cfg)
-	if err != nil {
-		return err
-	}
-
-	// Construct secret paths using environment variables
-	privateKeySecretPath := getEnv("ECDSA_PRIVATE_KEY_SECRET_PATH", "/ecdsa/private-key")
-	publicKeySecretPath := getEnv("ECDSA_PUBLIC_KEY_SECRET_PATH", "/ecdsa/public-key")
-
-	// Fetch the ECDSA private key
-	privateKey, err := secretManagerService.GetSecretValue(context.Background(), privateKeySecretPath)
-	if err != nil {
-		return err
-	}
-
-	ecdsaPrivateKey, err := jwt.ParseECPrivateKeyFromPEM([]byte(privateKey))
-	c.ECDSAPrivateKey = ecdsaPrivateKey
-
-	if err != nil {
-		return err
-	}
-
-	// Fetch the ECDSA public key
-	publicKey, err := secretManagerService.GetSecretValue(context.Background(), publicKeySecretPath)
-	if err != nil {
-		return err
-	}
-
-	ecdsaPublicKey, err := jwt.ParseECPublicKeyFromPEM([]byte(publicKey))
-
-	if err != nil {
-		return err
-	}
-	c.ECDSAPublicKey = ecdsaPublicKey
-
-	return nil
 }
 
 // getEnv reads an environment variable or returns a default value if the variable is not set

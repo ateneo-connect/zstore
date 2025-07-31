@@ -3,7 +3,7 @@ version: '3'
 tasks:
   build:
     cmds:
-      - mkdir -p bin && source .env && CGO_ENABLED=0 GOOS=linux go build -a -o bin/zstore ./cmd/server
+      - mkdir -p bin && source .env && CGO_ENABLED=0 GOOS=linux go build -a -o bin/zstore ./cmd
 
   test:
     cmds:

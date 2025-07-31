@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
 
 	"github.com/zzenonn/zstore/internal/config"
 	"github.com/zzenonn/zstore/internal/logging"
@@ -16,9 +16,9 @@ import (
 )
 
 var (
-	cfg                *config.Config
-	userService        *service.UserService
-	userProfileService *service.UserProfileService
+	cfg         *config.Config
+	userService *service.UserService
+	fileService *service.FileService
 )
 
 var rootCmd = &cobra.Command{
@@ -69,9 +69,9 @@ func initConfig() {
 	userRepository := db.NewUserRepository(dynamoDb.Client, cfg.DynamoDBTable)
 	userService = service.NewUserService(&userRepository)
 
-	s3Store := objectstore.NewObjectStore(cfg)
-	userProfileRepository := objectstore.NewUserProfileRepository(s3Store.Client, cfg.S3BucketName)
-	userProfileService = service.NewUserProfileService(&userProfileRepository)
+	s3Store := objectstore.NewS3ObjectStore(cfg)
+	s3ObjectRepository := objectstore.NewS3ObjectRepository(s3Store.Client, cfg.S3BucketName)
+	fileService = service.NewFileService(&s3ObjectRepository)
 }
 
 func init() {
