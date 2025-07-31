@@ -24,6 +24,7 @@ type MetadataRepository interface {
 type FileService struct {
 	repo         S3ObjectRepository
 	metadataRepo MetadataRepository
+	concurrency  int
 }
 
 // NewFileService creates a new FileService instance
@@ -31,6 +32,7 @@ func NewFileService(repo S3ObjectRepository, metadataRepo MetadataRepository) *F
 	return &FileService{
 		repo:         repo,
 		metadataRepo: metadataRepo,
+		concurrency:  3, // Default concurrency limit
 	}
 }
 
@@ -57,15 +59,18 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	metadata.Prefix = prefix
 	metadata.FileName = filepath.Base(key)
 
-	// Upload each shard in parallel
+	// Upload each shard in parallel with concurrency limit
 	var wg sync.WaitGroup
 	errorCh := make(chan error, len(shards))
+	semaphore := make(chan struct{}, s.concurrency) // Limit concurrent uploads
 
 	for i, shard := range shards {
 		wg.Add(1)
 		go func(i int, shard []byte) {
 			defer wg.Done()
-			shardKey := fmt.Sprintf("%s.shard_%d", key, i)
+			semaphore <- struct{}{}        // Acquire
+			defer func() { <-semaphore }() // Release
+			shardKey := fmt.Sprintf("%s/%s/%s", key, metadata.FileName, metadata.ShardHashes[i])
 			if err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet); err != nil {
 				errorCh <- err
 			}
