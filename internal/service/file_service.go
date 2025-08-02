@@ -59,7 +59,7 @@ func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataReposito
 	return &FileService{
 		objectRepo:   objectRepo,
 		metadataRepo: metadataRepo,
-		concurrency:  3, // Default concurrency limit
+		concurrency:  1, // Default concurrency limit
 	}
 }
 
@@ -70,6 +70,11 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return err
+	}
+
+	// Check for empty file
+	if len(data) == 0 {
+		return errors.ErrEmptyFile
 	}
 
 	// Create shards using erasure coding
@@ -164,7 +169,7 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 		return nil, err
 	}
 
-	fmt.Printf("Metadata: %+v\n", metadata)
+	log.Debugf("Object Metadata: %+v\n", metadata)
 
 	// Download each shard in parallel
 	shards := make([][]byte, len(metadata.ShardHashes))
@@ -223,5 +228,19 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 
 // DeleteFile deletes a file from S3
 func (s *FileService) DeleteFile(ctx context.Context, key string) error {
-	return s.objectRepo.Delete(ctx, key)
+	// Delete all shards using prefix
+	log.Debugf("Deleting Key %s", key)
+	if err := s.objectRepo.DeletePrefix(ctx, key); err != nil {
+		return err
+	}
+
+	// Delete metadata
+	prefix := filepath.Dir(key)
+	fileName := filepath.Base(key)
+	return s.metadataRepo.DeleteMetadata(ctx, prefix, fileName)
+}
+
+// SetConcurrency sets the concurrency limit for uploads
+func (s *FileService) SetConcurrency(concurrency int) {
+	s.concurrency = concurrency
 }

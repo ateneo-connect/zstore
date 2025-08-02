@@ -10,6 +10,7 @@ var (
 	ErrInvalidUser           = errors.New("invalid username or password")
 	ErrMissingRequiredFields = errors.New("missing required fields")
 	ErrInsufficientShards    = errors.New("insufficient shards available for reconstruction")
+	ErrEmptyFile             = errors.New("cannot upload empty file")
 )
 
 // FetchingResourceError generates a formatted error for failed fetching of any resource by its type.
