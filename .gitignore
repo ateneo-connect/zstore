@@ -40,5 +40,6 @@
 docker-compose.override.yml
 .env
 
+
 # Taskfile logs and temp files
 Taskfile.dist.yml
