@@ -22,15 +22,15 @@ type MetadataRepository interface {
 }
 
 type FileService struct {
-	repo         S3ObjectRepository
+	objectRepo   S3ObjectRepository
 	metadataRepo MetadataRepository
 	concurrency  int
 }
 
 // NewFileService creates a new FileService instance
-func NewFileService(repo S3ObjectRepository, metadataRepo MetadataRepository) *FileService {
+func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataRepository) *FileService {
 	return &FileService{
-		repo:         repo,
+		objectRepo:   objectRepo,
 		metadataRepo: metadataRepo,
 		concurrency:  3, // Default concurrency limit
 	}
@@ -79,7 +79,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 			// fmt.Println(shardKey)
 			// fmt.Println(key)
 			// fmt.Println(metadata.FileName)
-			if path, err := s.repo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet); err != nil {
+			if path, err := s.objectRepo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet); err != nil {
 				errorCh <- err
 			} else {
 				pathCh <- struct {
@@ -110,10 +110,10 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 
 // DownloadFile downloads a file from S3
 func (s *FileService) DownloadFile(ctx context.Context, key string) (io.ReadCloser, error) {
-	return s.repo.Download(ctx, key)
+	return s.objectRepo.Download(ctx, key)
 }
 
 // DeleteFile deletes a file from S3
 func (s *FileService) DeleteFile(ctx context.Context, key string) error {
-	return s.repo.Delete(ctx, key)
+	return s.objectRepo.Delete(ctx, key)
 }
