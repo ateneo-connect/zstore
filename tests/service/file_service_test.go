@@ -74,7 +74,7 @@ func (m *mockS3ObjectRepository) Upload(ctx context.Context, key string, r io.Re
 	return "test-bucket/" + key, nil
 }
 
-func (m *mockS3ObjectRepository) Download(ctx context.Context, key string) (io.ReadCloser, error) {
+func (m *mockS3ObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	if m.downloadFunc != nil {
 		return m.downloadFunc(ctx, key)
 	}
@@ -85,6 +85,10 @@ func (m *mockS3ObjectRepository) Delete(ctx context.Context, key string) error {
 	if m.deleteFunc != nil {
 		return m.deleteFunc(ctx, key)
 	}
+	return nil
+}
+
+func (m *mockS3ObjectRepository) DeletePrefix(ctx context.Context, prefix string) error {
 	return nil
 }
 
@@ -178,7 +182,7 @@ func TestFileService_DownloadFile(t *testing.T) {
 			mockMetaRepo := newMockMetadataRepository()
 			fs := service.NewFileService(mockRepo, mockMetaRepo)
 
-			reader, err := fs.DownloadFile(context.Background(), tt.key)
+			reader, err := fs.DownloadFile(context.Background(), tt.key, false)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DownloadFile() error = %v, wantErr %v", err, tt.wantErr)
@@ -229,7 +233,7 @@ func TestFileService_DeleteVerification(t *testing.T) {
 	}
 
 	// Verify file exists by downloading
-	downloadReader, err := fs.DownloadFile(context.Background(), key)
+	downloadReader, err := fs.DownloadFile(context.Background(), key, false)
 	if err != nil {
 		t.Fatalf("DownloadFile() before delete failed: %v", err)
 	}
@@ -242,7 +246,7 @@ func TestFileService_DeleteVerification(t *testing.T) {
 	}
 
 	// Verify file no longer exists
-	_, err = fs.DownloadFile(context.Background(), key)
+	_, err = fs.DownloadFile(context.Background(), key, false)
 	if err == nil {
 		t.Error("Expected download to fail after delete, but it succeeded")
 	}
@@ -284,7 +288,7 @@ func TestFileService_SmallFileUploadDownload(t *testing.T) {
 	}
 
 	// Download
-	downloadReader, err := fs.DownloadFile(context.Background(), key)
+	downloadReader, err := fs.DownloadFile(context.Background(), key, false)
 	if err != nil {
 		t.Fatalf("DownloadFile() failed: %v", err)
 	}
@@ -344,7 +348,7 @@ func TestFileService_LargeFileUploadDownload(t *testing.T) {
 	}
 
 	// Download the file
-	downloadReader, err := fs.DownloadFile(context.Background(), key)
+	downloadReader, err := fs.DownloadFile(context.Background(), key, false)
 	if err != nil {
 		t.Fatalf("DownloadFile() failed: %v", err)
 	}

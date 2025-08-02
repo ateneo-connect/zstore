@@ -9,6 +9,7 @@ var (
 	ErrNotImplemented        = errors.New("this function is not yet implemented")
 	ErrInvalidUser           = errors.New("invalid username or password")
 	ErrMissingRequiredFields = errors.New("missing required fields")
+	ErrInsufficientShards    = errors.New("insufficient shards available for reconstruction")
 )
 
 // FetchingResourceError generates a formatted error for failed fetching of any resource by its type.

@@ -5,17 +5,37 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/zzenonn/zstore/internal/domain"
+	"github.com/zzenonn/zstore/internal/errors"
 )
+
+func init() {
+	// Set log level based on environment variables
+	switch logLevel := strings.ToLower(os.Getenv("LOG_LEVEL")); logLevel {
+	case "trace":
+		log.SetLevel(log.TraceLevel)
+	case "debug":
+		log.SetLevel(log.DebugLevel)
+	case "info":
+		log.SetLevel(log.InfoLevel)
+	case "warn":
+		log.SetLevel(log.WarnLevel)
+	default:
+		log.SetLevel(log.ErrorLevel)
+	}
+}
 
 type S3ObjectRepository interface {
 	Upload(ctx context.Context, key string, r io.Reader, quiet bool) (string, error)
-	Download(ctx context.Context, key string) (io.ReadCloser, error)
+	Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
+	DeletePrefix(ctx context.Context, prefix string) error
 	GetBucketName() string
 	GetStorageType() string
 }
@@ -58,13 +78,16 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 		return err
 	}
 
+	log.Debugf("Uploading %s", key)
+
 	// Set prefix and filename for metadata
 	prefix := filepath.Dir(key)
-	if prefix == "." {
-		prefix = "root"
-	}
+
 	metadata.Prefix = prefix
 	metadata.FileName = filepath.Base(key)
+
+	// Delete prefix contents if it exists
+	s.objectRepo.DeletePrefix(ctx, key)
 
 	// Upload each shard in parallel with concurrency limit
 	var wg sync.WaitGroup
@@ -129,25 +152,73 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 }
 
 // DownloadFile downloads a file from S3
-func (s *FileService) DownloadFile(ctx context.Context, key string) (io.ReadCloser, error) {
+func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	// Get prefix and filename for metadata lookup
 	prefix := filepath.Dir(key)
-	if prefix == "." {
-		prefix = "root"
-	}
+
 	fileName := filepath.Base(key)
-	
+
 	// Get metadata
 	metadata, err := s.metadataRepo.GetMetadata(ctx, prefix, fileName)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	fmt.Printf("Metadata: %+v\n", metadata)
-	
-	// TODO: Implement shard reassembly using metadata.ShardHashes
-	_ = metadata
-	return s.objectRepo.Download(ctx, key)
+
+	// Download each shard in parallel
+	shards := make([][]byte, len(metadata.ShardHashes))
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, s.concurrency)
+
+	for i, shardInfo := range metadata.ShardHashes {
+		wg.Add(1)
+		go func(i int, shardInfo domain.ShardStorage) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			reader, err := s.objectRepo.Download(ctx, shardInfo.Key, quiet)
+			if err != nil {
+				// Use empty byte array for missing shards
+				shards[i] = nil
+				return
+			}
+			defer reader.Close()
+
+			shardData, err := io.ReadAll(reader)
+			if err != nil {
+				// Use empty byte array for corrupted shards
+				shards[i] = nil
+				return
+			}
+
+			shards[i] = shardData
+		}(i, shardInfo)
+	}
+
+	wg.Wait()
+
+	// Count nil shards and check if we have enough for reconstruction
+	nilCount := 0
+	for _, shard := range shards {
+		if shard == nil {
+			nilCount++
+		}
+	}
+	log.Debugf("%d shards missing", nilCount)
+
+	if nilCount > metadata.ParityShards {
+		return nil, errors.ErrInsufficientShards
+	}
+
+	// Reassemble the file
+	reconstructedData, err := ReconstructFile(shards, metadata)
+	if err != nil {
+		return nil, err
+	}
+
+	return io.NopCloser(bytes.NewReader(reconstructedData)), nil
 }
 
 // DeleteFile deletes a file from S3

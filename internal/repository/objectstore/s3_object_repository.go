@@ -70,7 +70,7 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 }
 
 // Download downloads an object file from S3
-func (r *S3ObjectRepository) Download(ctx context.Context, key string) (io.ReadCloser, error) {
+func (r *S3ObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	result, err := r.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
@@ -80,10 +80,12 @@ func (r *S3ObjectRepository) Download(ctx context.Context, key string) (io.ReadC
 	}
 
 	size := result.ContentLength
-	bar := progressbar.DefaultBytes(*size, "downloading")
-	proxyReader := progressbar.NewReader(result.Body, bar)
-
-	return &progressReaderCloser{Reader: &proxyReader, Closer: result.Body}, nil
+	if !quiet {
+		bar := progressbar.DefaultBytes(*size, "downloading")
+		proxyReader := progressbar.NewReader(result.Body, bar)
+		return &progressReaderCloser{Reader: &proxyReader, Closer: result.Body}, nil
+	}
+	return result.Body, nil
 }
 
 type progressReaderCloser struct {
@@ -98,4 +100,35 @@ func (r *S3ObjectRepository) Delete(ctx context.Context, key string) error {
 		Key:    aws.String(key),
 	})
 	return err
+}
+
+// DeletePrefix removes all objects with the given prefix from S3
+func (r *S3ObjectRepository) DeletePrefix(ctx context.Context, prefix string) error {
+	// List objects with the prefix
+	listInput := &s3.ListObjectsV2Input{
+		Bucket: aws.String(r.bucketName),
+		Prefix: aws.String(prefix),
+	}
+
+	for {
+		result, err := r.client.ListObjectsV2(ctx, listInput)
+		if err != nil {
+			return err
+		}
+
+		// Delete objects using existing Delete function
+		for _, obj := range result.Contents {
+			if err := r.Delete(ctx, *obj.Key); err != nil {
+				return err
+			}
+		}
+
+		// Check if there are more objects to delete
+		if result.IsTruncated == nil || !*result.IsTruncated {
+			break
+		}
+		listInput.ContinuationToken = result.NextContinuationToken
+	}
+
+	return nil
 }

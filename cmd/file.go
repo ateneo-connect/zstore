@@ -60,12 +60,19 @@ var downloadCmd = &cobra.Command{
 		key := strings.TrimPrefix(zsURL, "zs://")
 		// Keep bucket name as part of the prefix
 		
-		reader, err := fileService.DownloadFile(context.Background(), key)
+		quiet, _ := cmd.Flags().GetBool("quiet")
+		reader, err := fileService.DownloadFile(context.Background(), key, quiet)
 		if err != nil {
 			fmt.Printf("Error downloading file: %v\n", err)
 			return
 		}
 		defer reader.Close()
+
+		// If output path is a directory, use the filename from the key
+		if stat, err := os.Stat(outputPath); err == nil && stat.IsDir() {
+			fileName := filepath.Base(key)
+			outputPath = filepath.Join(outputPath, fileName)
+		}
 
 		// Create output directory if it doesn't exist
 		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
@@ -116,6 +123,7 @@ var deleteCmd = &cobra.Command{
 
 func init() {
 	uploadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
+	downloadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(deleteCmd)

@@ -4,9 +4,29 @@ import (
 	"bytes"
 	"hash/crc64"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/klauspost/reedsolomon"
+	log "github.com/sirupsen/logrus"
 	"github.com/zzenonn/zstore/internal/domain"
 )
+
+func init() {
+	// Set log level based on environment variables
+	switch logLevel := strings.ToLower(os.Getenv("LOG_LEVEL")); logLevel {
+	case "trace":
+		log.SetLevel(log.TraceLevel)
+	case "debug":
+		log.SetLevel(log.DebugLevel)
+	case "info":
+		log.SetLevel(log.InfoLevel)
+	case "warn":
+		log.SetLevel(log.WarnLevel)
+	default:
+		log.SetLevel(log.ErrorLevel)
+	}
+}
 
 func ShardFile(data []byte, dataShards, parityShards int) (domain.ObjectMetadata, [][]byte, error) {
 	enc, err := reedsolomon.New(dataShards, parityShards)
