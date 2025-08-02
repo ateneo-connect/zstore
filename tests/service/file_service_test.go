@@ -44,11 +44,14 @@ func newMockS3ObjectRepository() *mockS3ObjectRepository {
 	}
 }
 
-func (m *mockS3ObjectRepository) Upload(ctx context.Context, key string, r io.Reader, quiet bool) error {
+func (m *mockS3ObjectRepository) Upload(ctx context.Context, key string, r io.Reader, quiet bool) (string, error) {
 	if m.uploadFunc != nil {
-		return m.uploadFunc(ctx, key, r)
+		err := m.uploadFunc(ctx, key, r)
+		if err != nil {
+			return "", err
+		}
 	}
-	return nil
+	return "s3://test-bucket/" + key, nil
 }
 
 func (m *mockS3ObjectRepository) Download(ctx context.Context, key string) (io.ReadCloser, error) {

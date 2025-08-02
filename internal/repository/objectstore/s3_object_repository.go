@@ -24,7 +24,7 @@ func NewS3ObjectRepository(client *s3.Client, bucketName string) S3ObjectReposit
 }
 
 // Upload uploads an object file to S3
-func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.Reader, quiet bool) error {
+func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.Reader, quiet bool) (string, error) {
 	seeker, ok := reader.(io.Seeker)
 	var size int64 = -1
 	if ok {
@@ -53,7 +53,10 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 	}
 	
 	_, err := r.client.PutObject(ctx, input)
-	return err
+	if err != nil {
+		return "", err
+	}
+	return "s3://" + r.bucketName + "/" + key, nil
 }
 
 // Download downloads an object file from S3
