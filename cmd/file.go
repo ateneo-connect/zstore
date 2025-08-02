@@ -36,9 +36,15 @@ var uploadCmd = &cobra.Command{
 		defer file.Close()
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
-		dataShards, _ := cmd.Flags().GetInt("data-shards")
-		parityShards, _ := cmd.Flags().GetInt("parity-shards")
-		err = fileService.UploadFile(context.Background(), key, file, quiet, dataShards, parityShards)
+		noErasureCoding, _ := cmd.Flags().GetBool("no-erasure-coding")
+		
+		if noErasureCoding {
+			err = fileService.UploadFileRaw(context.Background(), key, file, quiet)
+		} else {
+			dataShards, _ := cmd.Flags().GetInt("data-shards")
+			parityShards, _ := cmd.Flags().GetInt("parity-shards")
+			err = fileService.UploadFile(context.Background(), key, file, quiet, dataShards, parityShards)
+		}
 		if err != nil {
 			fmt.Printf("Error uploading file: %v\n", err)
 			return
@@ -63,7 +69,15 @@ var downloadCmd = &cobra.Command{
 		// Keep bucket name as part of the prefix
 		
 		quiet, _ := cmd.Flags().GetBool("quiet")
-		reader, err := fileService.DownloadFile(context.Background(), key, quiet)
+		noErasureCoding, _ := cmd.Flags().GetBool("no-erasure-coding")
+		
+		var reader io.ReadCloser
+		var err error
+		if noErasureCoding {
+			reader, err = fileService.DownloadFileRaw(context.Background(), key, quiet)
+		} else {
+			reader, err = fileService.DownloadFile(context.Background(), key, quiet)
+		}
 		if err != nil {
 			fmt.Printf("Error downloading file: %v\n", err)
 			return
@@ -127,7 +141,9 @@ func init() {
 	uploadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	uploadCmd.Flags().Int("data-shards", 4, "Number of data shards for erasure coding")
 	uploadCmd.Flags().Int("parity-shards", 2, "Number of parity shards for erasure coding")
+	uploadCmd.Flags().Bool("no-erasure-coding", false, "Upload file directly without erasure coding")
 	downloadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
+	downloadCmd.Flags().Bool("no-erasure-coding", false, "Download file directly without erasure coding reconstruction")
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(deleteCmd)

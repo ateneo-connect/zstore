@@ -63,6 +63,19 @@ func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataReposito
 	}
 }
 
+// UploadFileRaw uploads a file directly to S3 without erasure coding
+func (s *FileService) UploadFileRaw(ctx context.Context, key string, r io.Reader, quiet bool) error {
+	log.Debugf("Uploading raw file %s", key)
+	_, err := s.objectRepo.Upload(ctx, key, r, quiet)
+	return err
+}
+
+// DownloadFileRaw downloads a file directly from S3 without erasure coding reconstruction
+func (s *FileService) DownloadFileRaw(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
+	log.Debugf("Downloading raw file %s", key)
+	return s.objectRepo.Download(ctx, key, quiet)
+}
+
 // UploadFile uploads a file to S3
 func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool, dataShards, parityShards int) error {
 
