@@ -36,7 +36,9 @@ var uploadCmd = &cobra.Command{
 		defer file.Close()
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
-		err = fileService.UploadFile(context.Background(), key, file, quiet)
+		dataShards, _ := cmd.Flags().GetInt("data-shards")
+		parityShards, _ := cmd.Flags().GetInt("parity-shards")
+		err = fileService.UploadFile(context.Background(), key, file, quiet, dataShards, parityShards)
 		if err != nil {
 			fmt.Printf("Error uploading file: %v\n", err)
 			return
@@ -123,6 +125,8 @@ var deleteCmd = &cobra.Command{
 
 func init() {
 	uploadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
+	uploadCmd.Flags().Int("data-shards", 4, "Number of data shards for erasure coding")
+	uploadCmd.Flags().Int("parity-shards", 2, "Number of parity shards for erasure coding")
 	downloadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(downloadCmd)

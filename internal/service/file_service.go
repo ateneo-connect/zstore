@@ -64,7 +64,7 @@ func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataReposito
 }
 
 // UploadFile uploads a file to S3
-func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool) error {
+func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool, dataShards, parityShards int) error {
 
 	// Read file data
 	data, err := io.ReadAll(r)
@@ -73,7 +73,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	}
 
 	// Create shards using erasure coding
-	metadata, shards, err := ShardFile(data, 4, 2) // 2 data shards, 2 parity shards
+	metadata, shards, err := ShardFile(data, dataShards, parityShards)
 	if err != nil {
 		return err
 	}
