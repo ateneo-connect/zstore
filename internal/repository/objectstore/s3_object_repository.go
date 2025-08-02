@@ -1,10 +1,12 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
 	"io"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/schollz/progressbar/v3"
 )
@@ -35,6 +37,8 @@ func (r *S3ObjectRepository) GetStorageType() string {
 
 // Upload uploads an object file to S3
 func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.Reader, quiet bool) (string, error) {
+	uploader := manager.NewUploader(r.client)
+	
 	seeker, ok := reader.(io.Seeker)
 	var size int64 = -1
 	if ok {
@@ -58,11 +62,8 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 		Key:    aws.String(key),
 		Body:   proxyReader,
 	}
-	if size > 0 {
-		input.ContentLength = &size
-	}
 
-	_, err := r.client.PutObject(ctx, input)
+	_, err := uploader.Upload(ctx, input)
 	if err != nil {
 		return "", err
 	}
@@ -71,26 +72,22 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 
 // Download downloads an object file from S3
 func (r *S3ObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
-	result, err := r.client.GetObject(ctx, &s3.GetObjectInput{
+	downloader := manager.NewDownloader(r.client)
+	
+	// Create a buffer to download into
+	buf := manager.NewWriteAtBuffer([]byte{})
+	
+	input := &s3.GetObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
-	})
+	}
+	
+	_, err := downloader.Download(ctx, buf, input)
 	if err != nil {
 		return nil, err
 	}
-
-	size := result.ContentLength
-	if !quiet {
-		bar := progressbar.DefaultBytes(*size, "downloading")
-		proxyReader := progressbar.NewReader(result.Body, bar)
-		return &progressReaderCloser{Reader: &proxyReader, Closer: result.Body}, nil
-	}
-	return result.Body, nil
-}
-
-type progressReaderCloser struct {
-	io.Reader
-	io.Closer
+	
+	return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }
 
 // Delete removes an object file from S3

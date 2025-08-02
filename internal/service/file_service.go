@@ -59,7 +59,7 @@ func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataReposito
 	return &FileService{
 		objectRepo:   objectRepo,
 		metadataRepo: metadataRepo,
-		concurrency:  1, // Default concurrency limit
+		concurrency:  3, // Default concurrency limit
 	}
 }
 
