@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/zzenonn/zstore/internal/domain"
@@ -15,10 +16,16 @@ type S3ObjectRepository interface {
 	Upload(ctx context.Context, key string, r io.Reader, quiet bool) (string, error)
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
+	GetBucketName() string
+	GetStorageType() string
 }
 
 type MetadataRepository interface {
 	CreateMetadata(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error)
+	GetMetadata(ctx context.Context, prefix, fileName string) (domain.ObjectMetadata, error)
+	ListMetadataByPrefix(ctx context.Context, prefix string) ([]domain.ObjectMetadata, error)
+	UpdateMetadata(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error)
+	DeleteMetadata(ctx context.Context, prefix, fileName string) error
 }
 
 type FileService struct {
@@ -63,8 +70,10 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	var wg sync.WaitGroup
 	errorCh := make(chan error, len(shards))
 	pathCh := make(chan struct {
-		index int
-		path  string
+		index       int
+		storageType string
+		bucketName  string
+		key         string
 	}, len(shards))
 	semaphore := make(chan struct{}, s.concurrency) // Limit concurrent uploads
 
@@ -75,17 +84,25 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 			semaphore <- struct{}{}        // Acquire
 			defer func() { <-semaphore }() // Release
 
-			shardKey := fmt.Sprintf("%s/%s", key, metadata.ShardHashes[i])
-			// fmt.Println(shardKey)
-			// fmt.Println(key)
-			// fmt.Println(metadata.FileName)
+			// Use original hash as part of shard key
+			originalHash := metadata.ShardHashes[i].Hash
+			shardKey := fmt.Sprintf("%s/%s", key, originalHash)
 			if path, err := s.objectRepo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet); err != nil {
 				errorCh <- err
 			} else {
+				// Parse key from path (format: bucket/key)
+				parts := strings.SplitN(path, "/", 2)
 				pathCh <- struct {
-					index int
-					path  string
-				}{i, path}
+					index       int
+					storageType string
+					bucketName  string
+					key         string
+				}{
+					index:       i,
+					storageType: s.objectRepo.GetStorageType(),
+					bucketName:  s.objectRepo.GetBucketName(),
+					key:         parts[1],
+				}
 			}
 		}(i, shard)
 	}
@@ -98,9 +115,12 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 		return err
 	}
 
-	// Update ShardHashes with actual upload paths
+	// Update ShardHashes with storage metadata
 	for result := range pathCh {
-		metadata.ShardHashes[result.index] = result.path
+		// Update storage info while preserving hash
+		metadata.ShardHashes[result.index].StorageType = result.storageType
+		metadata.ShardHashes[result.index].BucketName = result.bucketName
+		metadata.ShardHashes[result.index].Key = result.key
 	}
 
 	// Store metadata
@@ -110,6 +130,23 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 
 // DownloadFile downloads a file from S3
 func (s *FileService) DownloadFile(ctx context.Context, key string) (io.ReadCloser, error) {
+	// Get prefix and filename for metadata lookup
+	prefix := filepath.Dir(key)
+	if prefix == "." {
+		prefix = "root"
+	}
+	fileName := filepath.Base(key)
+	
+	// Get metadata
+	metadata, err := s.metadataRepo.GetMetadata(ctx, prefix, fileName)
+	if err != nil {
+		return nil, err
+	}
+	
+	fmt.Printf("Metadata: %+v\n", metadata)
+	
+	// TODO: Implement shard reassembly using metadata.ShardHashes
+	_ = metadata
 	return s.objectRepo.Download(ctx, key)
 }
 

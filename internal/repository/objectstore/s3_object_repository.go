@@ -23,6 +23,16 @@ func NewS3ObjectRepository(client *s3.Client, bucketName string) S3ObjectReposit
 	}
 }
 
+// GetBucketName returns the bucket name.
+func (r *S3ObjectRepository) GetBucketName() string {
+	return r.bucketName
+}
+
+// GetStorageType returns the object store type.
+func (r *S3ObjectRepository) GetStorageType() string {
+	return "s3"
+}
+
 // Upload uploads an object file to S3
 func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.Reader, quiet bool) (string, error) {
 	seeker, ok := reader.(io.Seeker)
@@ -35,14 +45,14 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 			}
 		}
 	}
-	
+
 	var proxyReader io.Reader = reader
 	if !quiet {
 		bar := progressbar.DefaultBytes(size, "uploading")
 		pbReader := progressbar.NewReader(reader, bar)
 		proxyReader = &pbReader
 	}
-	
+
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
@@ -51,12 +61,12 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 	if size > 0 {
 		input.ContentLength = &size
 	}
-	
+
 	_, err := r.client.PutObject(ctx, input)
 	if err != nil {
 		return "", err
 	}
-	return "s3://" + r.bucketName + "/" + key, nil
+	return r.bucketName + "/" + key, nil
 }
 
 // Download downloads an object file from S3
@@ -68,11 +78,11 @@ func (r *S3ObjectRepository) Download(ctx context.Context, key string) (io.ReadC
 	if err != nil {
 		return nil, err
 	}
-	
+
 	size := result.ContentLength
 	bar := progressbar.DefaultBytes(*size, "downloading")
 	proxyReader := progressbar.NewReader(result.Body, bar)
-	
+
 	return &progressReaderCloser{Reader: &proxyReader, Closer: result.Body}, nil
 }
 

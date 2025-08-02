@@ -23,11 +23,17 @@ func ShardFile(data []byte, dataShards, parityShards int) (domain.ObjectMetadata
 		return domain.ObjectMetadata{}, nil, err
 	}
 
-	var hashes []string
+	var hashes []domain.ShardStorage
 	table := crc64.MakeTable(crc64.ISO)
 	for _, shard := range shards {
 		crc := crc64.Checksum(shard, table)
-		hashes = append(hashes, fmt.Sprintf("%016x", crc))
+		shardStorage := domain.ShardStorage{
+			Hash:        fmt.Sprintf("%016x", crc),
+			StorageType: "",
+			BucketName:  "",
+			Key:         "",
+		}
+		hashes = append(hashes, shardStorage)
 	}
 
 	meta := domain.ObjectMetadata{

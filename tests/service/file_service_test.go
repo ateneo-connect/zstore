@@ -25,6 +25,7 @@ type mockS3ObjectRepository struct {
 // mockMetadataRepository is a mock implementation of metadata repository for testing.
 type mockMetadataRepository struct {
 	createFunc func(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error)
+	getFunc    func(ctx context.Context, prefix, fileName string) (domain.ObjectMetadata, error)
 }
 
 func newMockMetadataRepository() *mockMetadataRepository {
@@ -36,6 +37,25 @@ func (m *mockMetadataRepository) CreateMetadata(ctx context.Context, metadata do
 		return m.createFunc(ctx, metadata)
 	}
 	return metadata, nil
+}
+
+func (m *mockMetadataRepository) GetMetadata(ctx context.Context, prefix, fileName string) (domain.ObjectMetadata, error) {
+	if m.getFunc != nil {
+		return m.getFunc(ctx, prefix, fileName)
+	}
+	return domain.ObjectMetadata{Prefix: prefix, FileName: fileName}, nil
+}
+
+func (m *mockMetadataRepository) ListMetadataByPrefix(ctx context.Context, prefix string) ([]domain.ObjectMetadata, error) {
+	return nil, nil
+}
+
+func (m *mockMetadataRepository) UpdateMetadata(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error) {
+	return metadata, nil
+}
+
+func (m *mockMetadataRepository) DeleteMetadata(ctx context.Context, prefix, fileName string) error {
+	return nil
 }
 
 func newMockS3ObjectRepository() *mockS3ObjectRepository {
@@ -51,7 +71,7 @@ func (m *mockS3ObjectRepository) Upload(ctx context.Context, key string, r io.Re
 			return "", err
 		}
 	}
-	return "s3://test-bucket/" + key, nil
+	return "test-bucket/" + key, nil
 }
 
 func (m *mockS3ObjectRepository) Download(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -66,6 +86,14 @@ func (m *mockS3ObjectRepository) Delete(ctx context.Context, key string) error {
 		return m.deleteFunc(ctx, key)
 	}
 	return nil
+}
+
+func (m *mockS3ObjectRepository) GetBucketName() string {
+	return "test-bucket"
+}
+
+func (m *mockS3ObjectRepository) GetStorageType() string {
+	return "s3"
 }
 
 // TestFileService_UploadFile tests the UploadFile method for both success and error cases.
