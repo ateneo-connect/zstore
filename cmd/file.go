@@ -43,7 +43,8 @@ var uploadCmd = &cobra.Command{
 		} else {
 			dataShards, _ := cmd.Flags().GetInt("data-shards")
 			parityShards, _ := cmd.Flags().GetInt("parity-shards")
-			err = fileService.UploadFile(context.Background(), key, file, quiet, dataShards, parityShards)
+			concurrency, _ := cmd.Flags().GetInt("concurrency")
+			err = fileService.UploadFile(context.Background(), key, file, quiet, dataShards, parityShards, concurrency)
 		}
 		if err != nil {
 			fmt.Printf("Error uploading file: %v\n", err)
@@ -141,6 +142,7 @@ func init() {
 	uploadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	uploadCmd.Flags().Int("data-shards", 4, "Number of data shards for erasure coding")
 	uploadCmd.Flags().Int("parity-shards", 2, "Number of parity shards for erasure coding")
+	uploadCmd.Flags().Int("concurrency", 3, "Number of concurrent shard uploads")
 	uploadCmd.Flags().Bool("no-erasure-coding", false, "Upload file directly without erasure coding")
 	downloadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	downloadCmd.Flags().Bool("no-erasure-coding", false, "Download file directly without erasure coding reconstruction")

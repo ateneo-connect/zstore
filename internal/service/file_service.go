@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/zzenonn/zstore/internal/domain"
@@ -59,7 +60,7 @@ func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataReposito
 	return &FileService{
 		objectRepo:   objectRepo,
 		metadataRepo: metadataRepo,
-		concurrency:  3, // Default concurrency limit
+		concurrency:  1, // Default concurrency limit
 	}
 }
 
@@ -77,13 +78,16 @@ func (s *FileService) DownloadFileRaw(ctx context.Context, key string, quiet boo
 }
 
 // UploadFile uploads a file to S3
-func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool, dataShards, parityShards int) error {
+func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool, dataShards, parityShards, concurrency int) error {
+	start := time.Now()
 
 	// Read file data
+	readStart := time.Now()
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}
+	log.Debugf("File read took: %v", time.Since(readStart))
 
 	// Check for empty file
 	if len(data) == 0 {
@@ -91,10 +95,12 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	}
 
 	// Create shards using erasure coding
+	shardStart := time.Now()
 	metadata, shards, err := ShardFile(data, dataShards, parityShards)
 	if err != nil {
 		return err
 	}
+	log.Debugf("Sharding took: %v", time.Since(shardStart))
 
 	log.Debugf("Uploading %s", key)
 
@@ -105,9 +111,12 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	metadata.FileName = filepath.Base(key)
 
 	// Delete prefix contents if it exists
+	deleteStart := time.Now()
 	s.objectRepo.DeletePrefix(ctx, key)
+	log.Debugf("Delete prefix took: %v", time.Since(deleteStart))
 
 	// Upload each shard in parallel with concurrency limit
+	uploadStart := time.Now()
 	var wg sync.WaitGroup
 	errorCh := make(chan error, len(shards))
 	pathCh := make(chan struct {
@@ -116,7 +125,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 		bucketName  string
 		key         string
 	}, len(shards))
-	semaphore := make(chan struct{}, s.concurrency) // Limit concurrent uploads
+	semaphore := make(chan struct{}, concurrency) // Limit concurrent uploads
 
 	for i, shard := range shards {
 		wg.Add(1)
@@ -151,6 +160,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	wg.Wait()
 	close(errorCh)
 	close(pathCh)
+	log.Debugf("Shard uploads took: %v", time.Since(uploadStart))
 
 	if err := <-errorCh; err != nil {
 		return err
@@ -165,7 +175,10 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	}
 
 	// Store metadata
+	metadataStart := time.Now()
 	_, err = s.metadataRepo.CreateMetadata(ctx, metadata)
+	log.Debugf("Metadata storage took: %v", time.Since(metadataStart))
+	log.Debugf("Total upload took: %v", time.Since(start))
 	return err
 }
 

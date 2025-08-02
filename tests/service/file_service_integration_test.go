@@ -62,7 +62,7 @@ func TestFileService_UploadDownloadDelete_Integration(t *testing.T) {
 			key := "integration-test/test-file.bin"
 
 			// Test Upload
-			err = fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, 4, 2)
+			err = fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, 4, 2, 3)
 			if err != nil {
 				t.Fatalf("UploadFile failed: %v", err)
 			}
@@ -132,7 +132,7 @@ func TestFileService_UploadDownload_DifferentShardConfigurations(t *testing.T) {
 			key := "integration-test/shard-config-test.bin"
 
 			// Upload
-			err = fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, tc.dataShards, tc.parityShards)
+			err = fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, tc.dataShards, tc.parityShards, 3)
 			if err != nil {
 				t.Fatalf("UploadFile failed: %v", err)
 			}
@@ -181,7 +181,7 @@ func TestFileService_ConcurrentOperations(t *testing.T) {
 	for i := 0; i < numFiles; i++ {
 		keys[i] = fmt.Sprintf("integration-test/concurrent-test-%d.bin", i)
 		
-		err = fileService.UploadFile(context.Background(), keys[i], bytes.NewReader(originalData), true, 4, 2)
+		err = fileService.UploadFile(context.Background(), keys[i], bytes.NewReader(originalData), true, 4, 2, 3)
 		if err != nil {
 			t.Fatalf("UploadFile %d failed: %v", i, err)
 		}
@@ -220,7 +220,7 @@ func TestFileService_EmptyFile(t *testing.T) {
 	key := "integration-test/empty-file.bin"
 
 	// Upload should return error for empty file
-	err := fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, 4, 2)
+	err := fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, 4, 2, 3)
 	if err == nil {
 		t.Error("Expected UploadFile to fail for empty file, but it succeeded")
 	}
