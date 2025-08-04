@@ -11,6 +11,7 @@ var (
 	ErrMissingRequiredFields = errors.New("missing required fields")
 	ErrInsufficientShards    = errors.New("insufficient shards available for reconstruction")
 	ErrEmptyFile             = errors.New("cannot upload empty file")
+	ErrFileIntegrityCheck    = errors.New("file integrity check failed")
 )
 
 // FetchingResourceError generates a formatted error for failed fetching of any resource by its type.

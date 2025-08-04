@@ -70,19 +70,46 @@ func (r *S3ObjectRepository) Upload(ctx context.Context, key string, reader io.R
 	return r.bucketName + "/" + key, nil
 }
 
+// progressWriterAt wraps a WriterAt with a progress bar
+type progressWriterAt struct {
+	w   io.WriterAt
+	bar *progressbar.ProgressBar
+}
+
+func (pw *progressWriterAt) WriteAt(p []byte, off int64) (n int, err error) {
+	n, err = pw.w.WriteAt(p, off)
+	if pw.bar != nil {
+		pw.bar.Add(n)
+	}
+	return n, err
+}
+
 // Download downloads an object file from S3
 func (r *S3ObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	downloader := manager.NewDownloader(r.client)
 	
+	// Get object info for progress bar
+	var bar *progressbar.ProgressBar
+	if !quiet {
+		headResult, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{
+			Bucket: aws.String(r.bucketName),
+			Key:    aws.String(key),
+		})
+		if err == nil && headResult.ContentLength != nil {
+			bar = progressbar.DefaultBytes(*headResult.ContentLength, "downloading")
+		}
+	}
+	
 	// Create a buffer to download into
 	buf := manager.NewWriteAtBuffer([]byte{})
+	writer := &progressWriterAt{w: buf, bar: bar}
 	
 	input := &s3.GetObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
 	}
 	
-	_, err := downloader.Download(ctx, buf, input)
+	_, err := downloader.Download(ctx, writer, input)
 	if err != nil {
 		return nil, err
 	}

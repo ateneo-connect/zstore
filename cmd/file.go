@@ -71,12 +71,14 @@ var downloadCmd = &cobra.Command{
 		
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		noErasureCoding, _ := cmd.Flags().GetBool("no-erasure-coding")
+		concurrency, _ := cmd.Flags().GetInt("concurrency")
 		
 		var reader io.ReadCloser
 		var err error
 		if noErasureCoding {
 			reader, err = fileService.DownloadFileRaw(context.Background(), key, quiet)
 		} else {
+			fileService.SetConcurrency(concurrency)
 			reader, err = fileService.DownloadFile(context.Background(), key, quiet)
 		}
 		if err != nil {
@@ -145,6 +147,7 @@ func init() {
 	uploadCmd.Flags().Int("concurrency", 3, "Number of concurrent shard uploads")
 	uploadCmd.Flags().Bool("no-erasure-coding", false, "Upload file directly without erasure coding")
 	downloadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
+	downloadCmd.Flags().Int("concurrency", 3, "Number of concurrent shard downloads")
 	downloadCmd.Flags().Bool("no-erasure-coding", false, "Download file directly without erasure coding reconstruction")
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(downloadCmd)

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"hash/crc64"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,19 +17,7 @@ import (
 )
 
 func init() {
-	// Set log level based on environment variables
-	switch logLevel := strings.ToLower(os.Getenv("LOG_LEVEL")); logLevel {
-	case "trace":
-		log.SetLevel(log.TraceLevel)
-	case "debug":
-		log.SetLevel(log.DebugLevel)
-	case "info":
-		log.SetLevel(log.InfoLevel)
-	case "warn":
-		log.SetLevel(log.WarnLevel)
-	default:
-		log.SetLevel(log.ErrorLevel)
-	}
+	configureLogging()
 }
 
 type S3ObjectRepository interface {
@@ -60,7 +48,7 @@ func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataReposito
 	return &FileService{
 		objectRepo:   objectRepo,
 		metadataRepo: metadataRepo,
-		concurrency:  1, // Default concurrency limit
+		concurrency:  1,
 	}
 }
 
@@ -115,64 +103,12 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	s.objectRepo.DeletePrefix(ctx, key)
 	log.Debugf("Delete prefix took: %v", time.Since(deleteStart))
 
-	// Upload each shard in parallel with concurrency limit
+	// Upload shards in parallel
 	uploadStart := time.Now()
-	var wg sync.WaitGroup
-	errorCh := make(chan error, len(shards))
-	pathCh := make(chan struct {
-		index       int
-		storageType string
-		bucketName  string
-		key         string
-	}, len(shards))
-	semaphore := make(chan struct{}, concurrency) // Limit concurrent uploads
-
-	for i, shard := range shards {
-		wg.Add(1)
-		go func(i int, shard []byte) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
-
-			// Use original hash as part of shard key
-			originalHash := metadata.ShardHashes[i].Hash
-			shardKey := fmt.Sprintf("%s/%s", key, originalHash)
-			if path, err := s.objectRepo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet); err != nil {
-				errorCh <- err
-			} else {
-				// Parse key from path (format: bucket/key)
-				parts := strings.SplitN(path, "/", 2)
-				pathCh <- struct {
-					index       int
-					storageType string
-					bucketName  string
-					key         string
-				}{
-					index:       i,
-					storageType: s.objectRepo.GetStorageType(),
-					bucketName:  s.objectRepo.GetBucketName(),
-					key:         parts[1],
-				}
-			}
-		}(i, shard)
-	}
-
-	wg.Wait()
-	close(errorCh)
-	close(pathCh)
-	log.Debugf("Shard uploads took: %v", time.Since(uploadStart))
-
-	if err := <-errorCh; err != nil {
+	if err := s.uploadShards(ctx, key, shards, &metadata, quiet, concurrency, parityShards); err != nil {
 		return err
 	}
-
-	// Update ShardHashes with storage metadata
-	for result := range pathCh {
-		// Update storage info while preserving hash
-		metadata.ShardHashes[result.index].StorageType = result.storageType
-		metadata.ShardHashes[result.index].BucketName = result.bucketName
-		metadata.ShardHashes[result.index].Key = result.key
-	}
+	log.Debugf("Shard uploads took: %v", time.Since(uploadStart))
 
 	// Store metadata
 	metadataStart := time.Now()
@@ -197,53 +133,14 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 
 	log.Debugf("Object Metadata: %+v\n", metadata)
 
-	// Download each shard in parallel
-	shards := make([][]byte, len(metadata.ShardHashes))
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, s.concurrency)
-
-	for i, shardInfo := range metadata.ShardHashes {
-		wg.Add(1)
-		go func(i int, shardInfo domain.ShardStorage) {
-			defer wg.Done()
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			reader, err := s.objectRepo.Download(ctx, shardInfo.Key, quiet)
-			if err != nil {
-				// Use empty byte array for missing shards
-				shards[i] = nil
-				return
-			}
-			defer reader.Close()
-
-			shardData, err := io.ReadAll(reader)
-			if err != nil {
-				// Use empty byte array for corrupted shards
-				shards[i] = nil
-				return
-			}
-
-			shards[i] = shardData
-		}(i, shardInfo)
+	// Download shards using dynamic concurrency strategy
+	shards, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
+	if err != nil {
+		return nil, err
 	}
 
-	wg.Wait()
-
-	// Count nil shards and check if we have enough for reconstruction
-	nilCount := 0
-	for _, shard := range shards {
-		if shard == nil {
-			nilCount++
-		}
-	}
-	log.Debugf("%d shards missing", nilCount)
-
-	if nilCount > metadata.ParityShards {
-		return nil, errors.ErrInsufficientShards
-	}
-
-	// Reassemble the file
+	// Phase 5: Reconstruct original file from available shards
+	// Reed-Solomon can reconstruct with any minShardsNeeded valid shards
 	reconstructedData, err := ReconstructFile(shards, metadata)
 	if err != nil {
 		return nil, err
@@ -264,6 +161,252 @@ func (s *FileService) DeleteFile(ctx context.Context, key string) error {
 	prefix := filepath.Dir(key)
 	fileName := filepath.Base(key)
 	return s.metadataRepo.DeleteMetadata(ctx, prefix, fileName)
+}
+
+// uploadShards uploads erasure-coded shards in parallel with concurrency control
+// This function implements the core shard upload strategy:
+// 1. Creates goroutines for each shard upload (limited by semaphore)
+// 2. Uses fail-fast logic - stops if too many uploads fail
+// 3. Updates metadata with actual storage locations after successful uploads
+func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]byte, metadata *domain.ObjectMetadata, quiet bool, concurrency, parityShards int) error {
+	// Setup channels for goroutine coordination
+	var wg sync.WaitGroup
+	errorCh := make(chan error, len(shards))     // Buffered to prevent goroutine blocking
+	pathCh := make(chan struct {                 // Channel for successful upload results
+		index       int    // Shard index for metadata update
+		storageType string // Storage backend type (e.g., "s3")
+		bucketName  string // S3 bucket name
+		key         string // Actual S3 key where shard was stored
+	}, len(shards))
+	semaphore := make(chan struct{}, concurrency) // Limits concurrent uploads
+
+	// Launch upload goroutines for each shard
+	for i, shard := range shards {
+		wg.Add(1)
+		go func(i int, shard []byte) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // Acquire semaphore slot
+			defer func() { <-semaphore }() // Release semaphore slot
+
+			// Generate shard key using original hash from metadata
+			// Format: "original-file-key/shard-hash"
+			originalHash := metadata.ShardHashes[i].Hash
+			shardKey := fmt.Sprintf("%s/%s", key, originalHash)
+			
+			// Upload shard to object storage
+			path, err := s.objectRepo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet)
+			if err != nil {
+				errorCh <- err // Send error to main thread
+				return
+			}
+
+			// Parse returned path to extract actual storage key
+			// Expected format: "bucket/actual-key"
+			parts := strings.SplitN(path, "/", 2)
+			pathCh <- struct {
+				index       int
+				storageType string
+				bucketName  string
+				key         string
+			}{
+				index:       i,
+				storageType: s.objectRepo.GetStorageType(),
+				bucketName:  s.objectRepo.GetBucketName(),
+				key:         parts[1], // Extract key part after bucket
+			}
+		}(i, shard)
+	}
+
+	// Wait for all uploads to complete
+	wg.Wait()
+	close(errorCh)
+	close(pathCh)
+
+	// Implement fail-fast error handling
+	// Reed-Solomon can tolerate up to 'parityShards' failures
+	// If more than parityShards fail, we cannot guarantee reconstruction
+	errorCount := 0
+	var uploadErr error
+	for err := range errorCh {
+		if err != nil {
+			errorCount++
+			if uploadErr == nil {
+				uploadErr = err // Capture first error for reporting
+			}
+			// Fail fast if too many shards failed
+			if errorCount > parityShards {
+				return uploadErr
+			}
+		}
+	}
+	// If we had some failures but within tolerance, still return error
+	if uploadErr != nil {
+		return uploadErr
+	}
+
+	// Update metadata with actual storage locations
+	// This allows the download process to find shards later
+	for result := range pathCh {
+		metadata.ShardHashes[result.index].StorageType = result.storageType
+		metadata.ShardHashes[result.index].BucketName = result.bucketName
+		metadata.ShardHashes[result.index].Key = result.key
+	}
+
+	return nil
+}
+
+// downloadShards downloads shards using dynamic concurrency strategy
+func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([][]byte, error) {
+	// Dynamic Shard Downloading Strategy:
+	// 1. Start with limited concurrent downloads (s.concurrency)
+	// 2. When a shard completes, check if we need more shards
+	// 3. If still needed, start downloading the next available shard
+	// 4. Stop early once we have enough shards for reconstruction
+	// This optimizes network usage and reduces unnecessary downloads
+
+	shards := make([][]byte, len(shardHashes))
+	var wg sync.WaitGroup
+	var mu sync.Mutex               // Protects shared state between goroutines
+	successfulShards := 0           // Count of successfully downloaded shards
+	nextShardIndex := s.concurrency // Index of next shard to download
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Calculate minimum shards needed for Reed-Solomon reconstruction
+	// Formula: total_shards - parity_shards = minimum_data_shards_needed
+	minShardsNeeded := len(shardHashes) - parityShards
+
+	// Phase 1: Start initial batch of downloads (up to concurrency limit)
+	// This prevents overwhelming the network with too many simultaneous requests
+	for i := 0; i < s.concurrency && i < len(shardHashes); i++ {
+		wg.Add(1)
+		go s.downloadShard(ctx, &wg, &mu, shards, shardHashes[i], i, quiet, &successfulShards, &nextShardIndex, minShardsNeeded, shardHashes, cancel)
+	}
+
+	// Phase 2: Wait for all download goroutines to complete
+	// This includes both initial downloads and any dynamically started ones
+	wg.Wait()
+
+	// Phase 3: Log final count of successful downloads
+	// successfulShards is accurately maintained by downloadShard under mutex protection
+	log.Debugf("%d shards downloaded successfully", successfulShards)
+
+	// Phase 4: Ensure we have enough shards for Reed-Solomon reconstruction
+	// If insufficient, return error rather than attempting reconstruction
+	if successfulShards < minShardsNeeded {
+		return nil, errors.ErrInsufficientShards
+	}
+
+	return shards, nil
+}
+
+// verifyFileIntegrity checks if the reconstructed file matches the expected CRC64 hash
+func verifyFileIntegrity(data []byte, expectedHash string) error {
+	table := crc64.MakeTable(crc64.ISO)
+	fileHash := fmt.Sprintf("%016x", crc64.Checksum(data, table))
+
+	if fileHash != expectedHash {
+		log.Debugf("Integrity check failed: expected %s, got %s", expectedHash, fileHash)
+		return errors.ErrFileIntegrityCheck
+	}
+	log.Debugf("File integrity check passed: %s", fileHash)
+	return nil
+}
+
+// downloadShard downloads a single shard and manages dynamic concurrency
+// This function implements the core logic for the dynamic downloading strategy:
+// 1. Downloads the assigned shard
+// 2. Verifies shard integrity using CRC64 hash
+// 3. Decides whether to start downloading additional shards
+// 4. Handles early termination when enough shards are available
+func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, shards [][]byte, shardInfo domain.ShardStorage, i int, quiet bool, successfulShards *int, nextShardIndex *int, minShardsNeeded int, allShards []domain.ShardStorage, cancel context.CancelFunc) {
+	defer wg.Done()
+
+	// Early termination check: stop if context was cancelled
+	// This happens when we already have enough shards or an error occurred
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+
+	// Step 1: Download the shard data from storage
+	reader, err := s.objectRepo.Download(ctx, shardInfo.Key, quiet)
+	if err != nil {
+		// Mark shard as failed and potentially start next download
+		shards[i] = nil
+		s.maybeStartNext(wg, mu, shards, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		return
+	}
+	defer reader.Close()
+
+	// Step 2: Read shard data into memory
+	shardData, err := io.ReadAll(reader)
+	if err != nil {
+		// Mark shard as failed and potentially start next download
+		shards[i] = nil
+		s.maybeStartNext(wg, mu, shards, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		return
+	}
+
+	// Step 3: Verify shard integrity using CRC64 hash
+	// This ensures downloaded data matches what was originally stored
+	if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
+		log.Warnf("Shard %d failed integrity check", i)
+		// Mark shard as failed and potentially start next download
+		shards[i] = nil
+		s.maybeStartNext(wg, mu, shards, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		return
+	}
+
+	// Step 4: Successfully downloaded and verified shard
+	// Update shared state under mutex protection
+	mu.Lock()
+	shards[i] = shardData
+	*successfulShards++
+
+	// Step 5: Early termination optimization
+	// If we have enough shards for reconstruction, cancel remaining downloads
+	// This prevents unnecessary network traffic and speeds up the process
+	if *successfulShards >= minShardsNeeded {
+		cancel() // Signal all other goroutines to stop
+		mu.Unlock()
+		return
+	}
+	mu.Unlock()
+
+	// Step 6: Dynamic concurrency - start next download if needed
+	// This maintains optimal network utilization by keeping downloads active
+	s.maybeStartNext(wg, mu, shards, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+}
+
+// maybeStartNext implements the dynamic concurrency control logic
+// This function decides whether to start downloading the next available shard
+// based on current progress and remaining needs. It's called after each
+// shard completion (success or failure) to maintain optimal download flow.
+func (s *FileService) maybeStartNext(wg *sync.WaitGroup, mu *sync.Mutex, shards [][]byte, successfulShards *int, nextShardIndex *int, minShardsNeeded int, allShards []domain.ShardStorage, ctx context.Context, cancel context.CancelFunc, quiet bool) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Decision Logic: Start next download only if BOTH conditions are true:
+	// 1. We still need more shards (*successfulShards < minShardsNeeded)
+	// 2. There are more shards available to download (*nextShardIndex < len(allShards))
+	//
+	// This prevents:
+	// - Starting unnecessary downloads when we have enough shards
+	// - Attempting to download non-existent shards (index out of bounds)
+	if *successfulShards < minShardsNeeded && *nextShardIndex < len(allShards) {
+		// Atomically claim the next shard index to prevent race conditions
+		currentIndex := *nextShardIndex
+		*nextShardIndex++
+
+		// Start new download goroutine for the claimed shard
+		// This maintains the concurrency level as other downloads complete
+		wg.Add(1)
+		go s.downloadShard(ctx, wg, mu, shards, allShards[currentIndex], currentIndex, quiet, successfulShards, nextShardIndex, minShardsNeeded, allShards, cancel)
+	}
+	// If conditions not met, no new download is started, allowing
+	// the system to naturally wind down as remaining downloads complete
 }
 
 // SetConcurrency sets the concurrency limit for uploads

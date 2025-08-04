@@ -15,9 +15,8 @@ import (
 	"github.com/zzenonn/zstore/internal/repository/migrate"
 )
 
-func init() {
-	// Set log level based on environment variables
-	switch logLevel := strings.ToLower(os.Getenv("LOG_LEVEL")); logLevel {
+func configureLogging() {
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
 	case "trace":
 		log.SetLevel(log.TraceLevel)
 	case "debug":
@@ -29,6 +28,10 @@ func init() {
 	default:
 		log.SetLevel(log.ErrorLevel)
 	}
+}
+
+func init() {
+	configureLogging()
 }
 
 type Migration interface {
