@@ -1,3 +1,28 @@
+// Package service provides the core business logic for the erasure coding object storage system.
+// This file implements Reed-Solomon erasure coding functionality for data protection.
+//
+// The erasure coding service provides two main operations:
+// 1. ShardFile: Splits a file into data and parity shards using Reed-Solomon encoding
+// 2. ReconstructFile: Rebuilds the original file from available shards
+//
+// Reed-Solomon Erasure Coding:
+// - Splits data into N data shards and M parity shards
+// - Can reconstruct original data with any N shards (out of N+M total)
+// - Provides fault tolerance: can lose up to M shards without data loss
+// - Each shard gets a CRC64 hash for integrity verification
+//
+// Key Features:
+// - Configurable data/parity shard ratios
+// - CRC64 integrity hashing for each shard
+// - Metadata generation with shard information
+// - Efficient reconstruction algorithm
+//
+// Usage:
+//   metadata, shards, err := ShardFile(data, 4, 2)  // 4 data + 2 parity shards
+//   reconstructed, err := ReconstructFile(shards, metadata)
+//
+// The service integrates with FileService to provide distributed, fault-tolerant
+// file storage across multiple buckets and cloud providers.
 package service
 
 import (
@@ -9,9 +34,7 @@ import (
 	"github.com/zzenonn/zstore/internal/domain"
 )
 
-func init() {
-	configureLogging()
-}
+
 
 func ShardFile(data []byte, dataShards, parityShards int) (domain.ObjectMetadata, [][]byte, error) {
 	enc, err := reedsolomon.New(dataShards, parityShards)

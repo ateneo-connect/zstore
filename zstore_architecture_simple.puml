@@ -1,0 +1,107 @@
+@startuml
+!theme plain
+allowmixing
+skinparam nodesep 60
+skinparam ranksep 100
+title Zstore - Erasure Coding File Storage System
+
+package "CLI Layer" #E1F5FE {
+  class uploadCmd <<cobra.Command>>
+  class downloadCmd <<cobra.Command>>
+  class deleteCmd <<cobra.Command>>
+}
+
+package "Service Layer" #F3E5F5 {
+  class FileService {
+    +UploadFile()
+    +DownloadFile()
+    +DeleteFile()
+  }
+  
+  class ErasureCoding {
+    +ShardFile()
+    +ReconstructFile()
+    +ReedSolomon
+  }
+}
+
+package "Placement Layer" #F0F4C3 {
+  interface Placer {
+    +SelectBucketForUpload()
+    +GetRepositoryForBucket()
+  }
+  
+  class RoundRobinPlacer {
+    +RegisterBucket()
+    +ListBuckets()
+  }
+}
+
+package "Repository Layer" #E8F5E8 {
+  class ObjectRepositoryFactory {
+    +CreateRepository()
+    +ParseBucketConfig()
+  }
+  
+  class S3ObjectRepository {
+    +Upload()
+    +Download()
+    +DeletePrefix()
+  }
+  
+  class GCSObjectRepository {
+    +Upload()
+    +Download()
+    +DeletePrefix()
+  }
+  
+  class MetadataRepository {
+    +CreateMetadata()
+    +GetMetadata()
+    +DeleteMetadata()
+  }
+}
+
+package "Domain Layer" #FFF3E0 {
+  class ObjectMetadata {
+    +Prefix: string
+    +FileName: string
+    +ShardHashes: []ShardStorage
+  }
+  
+  class ShardStorage {
+    +Hash: string
+    +BucketName: string
+  }
+}
+
+package "External Systems" #FFEBEE {
+  database "S3 Buckets" as S3
+  database "GCS Buckets" as GCS
+  database "NoSQL DB" as NoSQL
+}
+
+' Main connections
+uploadCmd --> FileService : upload
+downloadCmd --> FileService : download
+deleteCmd --> FileService : delete
+
+FileService --> ErasureCoding : encode
+FileService --> Placer 
+FileService --> MetadataRepository : metadata
+
+RoundRobinPlacer ..|> Placer
+Placer --> ObjectRepositoryFactory : create repos
+ObjectRepositoryFactory --> S3ObjectRepository : creates
+ObjectRepositoryFactory --> GCSObjectRepository : creates
+S3ObjectRepository --> S3 : store shards
+GCSObjectRepository --> GCS : store shards
+MetadataRepository --> NoSQL
+
+FileService --> ObjectMetadata
+ObjectMetadata --> ShardStorage
+
+note top of uploadCmd : **Upload Flow:**\n1. CLI → FileService\n2. Erasure encode\n3. Select buckets\n4. Upload shards\n5. Store metadata
+
+note bottom of NoSQL : **Download Flow:**\n1. Get metadata\n2. Download shards\n3. Reconstruct file
+@enduml

@@ -3,8 +3,6 @@ package db
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -15,24 +13,7 @@ import (
 	"github.com/zzenonn/zstore/internal/repository/migrate"
 )
 
-func configureLogging() {
-	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
-	case "trace":
-		log.SetLevel(log.TraceLevel)
-	case "debug":
-		log.SetLevel(log.DebugLevel)
-	case "info":
-		log.SetLevel(log.InfoLevel)
-	case "warn":
-		log.SetLevel(log.WarnLevel)
-	default:
-		log.SetLevel(log.ErrorLevel)
-	}
-}
 
-func init() {
-	configureLogging()
-}
 
 type Migration interface {
 	Up(ctx context.Context, client *dynamodb.Client) error

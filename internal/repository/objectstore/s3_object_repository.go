@@ -17,14 +17,6 @@ type S3ObjectRepository struct {
 	bucketName string
 }
 
-// NewS3ObjectRepository initializes a new S3ObjectRepository.
-func NewS3ObjectRepository(client *s3.Client, bucketName string) S3ObjectRepository {
-	return S3ObjectRepository{
-		client:     client,
-		bucketName: bucketName,
-	}
-}
-
 // GetBucketName returns the bucket name.
 func (r *S3ObjectRepository) GetBucketName() string {
 	return r.bucketName

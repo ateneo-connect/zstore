@@ -13,21 +13,28 @@ import (
 
 var quiet bool
 
+// parseZsURL parses a zs:// URL and returns the key
+func parseZsURL(zsURL string) (string, error) {
+	if !strings.HasPrefix(zsURL, "zs://") {
+		return "", fmt.Errorf("URL must start with zs://")
+	}
+	return strings.TrimPrefix(zsURL, "zs://"), nil
+}
+
 var uploadCmd = &cobra.Command{
 	Use:   "upload [file-path] [zs://bucket/prefix/object]",
 	Short: "Upload a file to S3",
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		filePath, zsURL := args[0], args[1]
-		
+
 		// Parse zs:// URL to extract key
-		if !strings.HasPrefix(zsURL, "zs://") {
-			fmt.Printf("Error: URL must start with zs://\n")
+		key, err := parseZsURL(zsURL)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
 			return
 		}
-		key := strings.TrimPrefix(zsURL, "zs://")
-		// Keep bucket name as part of the prefix
-		
+
 		file, err := os.Open(filePath)
 		if err != nil {
 			fmt.Printf("Error opening file: %v\n", err)
@@ -37,9 +44,9 @@ var uploadCmd = &cobra.Command{
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		noErasureCoding, _ := cmd.Flags().GetBool("no-erasure-coding")
-		
+
 		if noErasureCoding {
-			err = fileService.UploadFileRaw(context.Background(), key, file, quiet)
+			err = rawFileService.UploadFileRaw(context.Background(), key, file, quiet)
 		} else {
 			dataShards, _ := cmd.Flags().GetInt("data-shards")
 			parityShards, _ := cmd.Flags().GetInt("parity-shards")
@@ -60,25 +67,21 @@ var downloadCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		zsURL, outputPath := args[0], args[1]
-		
+
 		// Parse zs:// URL to extract key
-		if !strings.HasPrefix(zsURL, "zs://") {
-			fmt.Printf("Error: URL must start with zs://\n")
+		key, err := parseZsURL(zsURL)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
 			return
 		}
-		key := strings.TrimPrefix(zsURL, "zs://")
-		// Keep bucket name as part of the prefix
-		
+
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		noErasureCoding, _ := cmd.Flags().GetBool("no-erasure-coding")
-		concurrency, _ := cmd.Flags().GetInt("concurrency")
-		
+
 		var reader io.ReadCloser
-		var err error
 		if noErasureCoding {
-			reader, err = fileService.DownloadFileRaw(context.Background(), key, quiet)
+			reader, err = rawFileService.DownloadFileRaw(context.Background(), key, quiet)
 		} else {
-			fileService.SetConcurrency(concurrency)
 			reader, err = fileService.DownloadFile(context.Background(), key, quiet)
 		}
 		if err != nil {
@@ -122,16 +125,15 @@ var deleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		zsURL := args[0]
-		
+
 		// Parse zs:// URL to extract key
-		if !strings.HasPrefix(zsURL, "zs://") {
-			fmt.Printf("Error: URL must start with zs://\n")
+		key, err := parseZsURL(zsURL)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
 			return
 		}
-		key := strings.TrimPrefix(zsURL, "zs://")
-		// Keep bucket name as part of the prefix
-		
-		err := fileService.DeleteFile(context.Background(), key)
+
+		err = fileService.DeleteFile(context.Background(), key)
 		if err != nil {
 			fmt.Printf("Error deleting file: %v\n", err)
 			return

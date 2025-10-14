@@ -1,14 +1,30 @@
 package logging
 
 import (
+	"os"
+	"strings"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/zzenonn/zstore/internal/config"
 )
 
 // InitLogger sets the log level and format based on the provided configuration
 func InitLogger(cfg *config.Config) {
-	// Set log level based on the log level from the config
-	switch logLevel := cfg.LogLevel; logLevel {
+	setLogLevel(cfg.LogLevel)
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+}
+
+// InitFromEnv initializes logging from environment variables
+func InitFromEnv() {
+	logLevel := strings.ToLower(os.Getenv("LOG_LEVEL"))
+	setLogLevel(logLevel)
+}
+
+// setLogLevel sets the log level based on string input
+func setLogLevel(logLevel string) {
+	switch logLevel {
 	case "trace":
 		log.SetLevel(log.TraceLevel)
 	case "debug":
@@ -20,9 +36,8 @@ func InitLogger(cfg *config.Config) {
 	default:
 		log.SetLevel(log.ErrorLevel)
 	}
+}
 
-	// Optional: Customize the log format (e.g., JSONFormatter or TextFormatter)
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true,
-	})
+func init() {
+	InitFromEnv()
 }

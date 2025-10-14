@@ -1,3 +1,24 @@
+// Package service provides the core business logic for the erasure coding object storage system.
+// This file implements the main FileService for erasure-coded file operations.
+//
+// FileService provides erasure-coded file operations with the following features:
+// - Reed-Solomon erasure coding for fault tolerance
+// - Multi-bucket shard distribution via placement strategies
+// - Dynamic concurrent downloads with early termination
+// - Shard integrity verification using CRC64 hashes
+// - Fail-fast upload logic respecting parity shard limits
+// - Metadata storage for reconstruction information
+//
+// Key Operations:
+// - UploadFile: Shards file, distributes across buckets, stores metadata
+// - DownloadFile: Retrieves shards, verifies integrity, reconstructs file
+// - DeleteFile: Removes shards from all buckets and metadata
+//
+// Architecture:
+// - Uses Placer interface for multi-bucket/multi-provider support
+// - Integrates with MetadataRepository for shard location tracking
+// - Implements dynamic concurrency control for optimal performance
+// - Supports configurable Reed-Solomon parameters (data/parity shards)
 package service
 
 import (
@@ -14,20 +35,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/zzenonn/zstore/internal/domain"
 	"github.com/zzenonn/zstore/internal/errors"
+	"github.com/zzenonn/zstore/internal/placement"
 )
-
-func init() {
-	configureLogging()
-}
-
-type S3ObjectRepository interface {
-	Upload(ctx context.Context, key string, r io.Reader, quiet bool) (string, error)
-	Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error)
-	Delete(ctx context.Context, key string) error
-	DeletePrefix(ctx context.Context, prefix string) error
-	GetBucketName() string
-	GetStorageType() string
-}
 
 type MetadataRepository interface {
 	CreateMetadata(ctx context.Context, metadata domain.ObjectMetadata) (domain.ObjectMetadata, error)
@@ -38,31 +47,18 @@ type MetadataRepository interface {
 }
 
 type FileService struct {
-	objectRepo   S3ObjectRepository
+	placer       placement.Placer
 	metadataRepo MetadataRepository
 	concurrency  int
 }
 
 // NewFileService creates a new FileService instance
-func NewFileService(objectRepo S3ObjectRepository, metadataRepo MetadataRepository) *FileService {
+func NewFileService(placer placement.Placer, metadataRepo MetadataRepository) *FileService {
 	return &FileService{
-		objectRepo:   objectRepo,
+		placer:       placer,
 		metadataRepo: metadataRepo,
 		concurrency:  1,
 	}
-}
-
-// UploadFileRaw uploads a file directly to S3 without erasure coding
-func (s *FileService) UploadFileRaw(ctx context.Context, key string, r io.Reader, quiet bool) error {
-	log.Debugf("Uploading raw file %s", key)
-	_, err := s.objectRepo.Upload(ctx, key, r, quiet)
-	return err
-}
-
-// DownloadFileRaw downloads a file directly from S3 without erasure coding reconstruction
-func (s *FileService) DownloadFileRaw(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
-	log.Debugf("Downloading raw file %s", key)
-	return s.objectRepo.Download(ctx, key, quiet)
 }
 
 // UploadFile uploads a file to S3
@@ -98,9 +94,14 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	metadata.Prefix = prefix
 	metadata.FileName = filepath.Base(key)
 
-	// Delete prefix contents if it exists
+	// Delete prefix contents if it exists from all buckets
 	deleteStart := time.Now()
-	s.objectRepo.DeletePrefix(ctx, key)
+	buckets := s.placer.ListBuckets()
+	for _, bucketName := range buckets {
+		if repo, err := s.placer.GetRepositoryForBucket(bucketName); err == nil {
+			repo.DeletePrefix(ctx, key) // Ignore errors
+		}
+	}
 	log.Debugf("Delete prefix took: %v", time.Since(deleteStart))
 
 	// Upload shards in parallel
@@ -151,10 +152,15 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 
 // DeleteFile deletes a file from S3
 func (s *FileService) DeleteFile(ctx context.Context, key string) error {
-	// Delete all shards using prefix
+	// Delete all shards using prefix from all buckets
 	log.Debugf("Deleting Key %s", key)
-	if err := s.objectRepo.DeletePrefix(ctx, key); err != nil {
-		return err
+	buckets := s.placer.ListBuckets()
+	for _, bucketName := range buckets {
+		repo, err := s.placer.GetRepositoryForBucket(bucketName)
+		if err != nil {
+			continue // Skip failed buckets
+		}
+		repo.DeletePrefix(ctx, key)
 	}
 
 	// Delete metadata
@@ -171,8 +177,8 @@ func (s *FileService) DeleteFile(ctx context.Context, key string) error {
 func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]byte, metadata *domain.ObjectMetadata, quiet bool, concurrency, parityShards int) error {
 	// Setup channels for goroutine coordination
 	var wg sync.WaitGroup
-	errorCh := make(chan error, len(shards))     // Buffered to prevent goroutine blocking
-	pathCh := make(chan struct {                 // Channel for successful upload results
+	errorCh := make(chan error, len(shards)) // Buffered to prevent goroutine blocking
+	pathCh := make(chan struct {             // Channel for successful upload results
 		index       int    // Shard index for metadata update
 		storageType string // Storage backend type (e.g., "s3")
 		bucketName  string // S3 bucket name
@@ -192,9 +198,16 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 			// Format: "original-file-key/shard-hash"
 			originalHash := metadata.ShardHashes[i].Hash
 			shardKey := fmt.Sprintf("%s/%s", key, originalHash)
-			
-			// Upload shard to object storage
-			path, err := s.objectRepo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet)
+
+			// Select bucket and repository for this shard using placement algorithm
+			bucketName, repo, err := s.placer.Place(i)
+			if err != nil {
+				errorCh <- err
+				return
+			}
+
+			// Upload shard to selected bucket
+			path, err := repo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet)
 			if err != nil {
 				errorCh <- err // Send error to main thread
 				return
@@ -210,8 +223,8 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 				key         string
 			}{
 				index:       i,
-				storageType: s.objectRepo.GetStorageType(),
-				bucketName:  s.objectRepo.GetBucketName(),
+				storageType: repo.GetStorageType(),
+				bucketName:  bucketName,
 				key:         parts[1], // Extract key part after bucket
 			}
 		}(i, shard)
@@ -330,8 +343,16 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	default:
 	}
 
-	// Step 1: Download the shard data from storage
-	reader, err := s.objectRepo.Download(ctx, shardInfo.Key, quiet)
+	// Step 1: Get repository for the shard's bucket and download
+	repo, err := s.placer.GetRepositoryForBucket(shardInfo.BucketName)
+	if err != nil {
+		// Mark shard as failed and potentially start next download
+		shards[i] = nil
+		s.maybeStartNext(wg, mu, shards, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		return
+	}
+
+	reader, err := repo.Download(ctx, shardInfo.Key, quiet)
 	if err != nil {
 		// Mark shard as failed and potentially start next download
 		shards[i] = nil
