@@ -25,9 +25,9 @@ git show v0.1.0-stable
 ### Architecture & Code Organization
 - [x] **Separate RoundRobinPlacer into its own file** (`internal/placement/round_robin.go`)
 - [x] **Remove obsolete storage_router.go** from service package
-- [ ] **Create config file logic** for persistent configuration management
-- [ ] **Implement list zs** command for listing stored files
-- [ ] **Add raw bucket selection flag** for specifying which bucket to use for `--no-erasure-coding` operations
+- [x] **Create config file logic** for persistent configuration management
+- [x] **Implement list zs** command for listing stored files
+- [x] **Add raw bucket selection flag** for specifying which bucket to use for `--no-erasure-coding` operations
 
 ### Testing & Quality
 - [ ] **Fix Tests:** Update benchmark tests to use placement.Placer instead of direct S3ObjectRepository
@@ -35,5 +35,5 @@ git show v0.1.0-stable
 - [ ] **Fix Tests:** Update all tests to reflect new multi-provider architecture and placement system
 
 ### Performance & User Experience
-- [ ] **Make download concurrent** for improved performance with configurable concurrency
-- [ ] **Remove S3 references** from code comments and flags since the system now supports multiple providers
+- [x] **Make download concurrent** for improved performance with configurable concurrency
+- [x] **Remove S3 references** from code comments and flags since the system now supports multiple providers

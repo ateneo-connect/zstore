@@ -23,7 +23,7 @@ func parseZsURL(zsURL string) (string, error) {
 
 var uploadCmd = &cobra.Command{
 	Use:   "upload [file-path] [zs://bucket/prefix/object]",
-	Short: "Upload a file to S3",
+	Short: "Upload a file to cloud storage",
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		filePath, zsURL := args[0], args[1]
@@ -63,7 +63,7 @@ var uploadCmd = &cobra.Command{
 
 var downloadCmd = &cobra.Command{
 	Use:   "download [zs://bucket/prefix/object] [output-path]",
-	Short: "Download a file from S3",
+	Short: "Download a file from cloud storage",
 	Args:  cobra.ExactArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		zsURL, outputPath := args[0], args[1]
@@ -77,11 +77,13 @@ var downloadCmd = &cobra.Command{
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		noErasureCoding, _ := cmd.Flags().GetBool("no-erasure-coding")
+		concurrency, _ := cmd.Flags().GetInt("concurrency")
 
 		var reader io.ReadCloser
 		if noErasureCoding {
 			reader, err = rawFileService.DownloadFileRaw(context.Background(), key, quiet)
 		} else {
+			fileService.SetConcurrency(concurrency)
 			reader, err = fileService.DownloadFile(context.Background(), key, quiet)
 		}
 		if err != nil {
@@ -121,7 +123,7 @@ var downloadCmd = &cobra.Command{
 
 var deleteCmd = &cobra.Command{
 	Use:   "delete [zs://bucket/prefix/object]",
-	Short: "Delete a file from S3",
+	Short: "Delete a file from cloud storage",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		zsURL := args[0]
@@ -142,6 +144,38 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
+var listCmd = &cobra.Command{
+	Use:   "list [zs://bucket/prefix]",
+	Short: "List files in cloud storage",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		zsURL := args[0]
+		
+		// Parse zs:// URL to extract prefix
+		prefix, err := parseZsURL(zsURL)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+		
+		files, err := fileService.ListFiles(context.Background(), prefix)
+		if err != nil {
+			fmt.Printf("Error listing files: %v\n", err)
+			return
+		}
+		
+		if len(files) == 0 {
+			fmt.Printf("No files found in %s\n", zsURL)
+			return
+		}
+		
+		fmt.Printf("Files in %s:\n", zsURL)
+		for _, file := range files {
+			fmt.Printf("  %s/%s\n", file.Prefix, file.FileName)
+		}
+	},
+}
+
 func init() {
 	uploadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	uploadCmd.Flags().Int("data-shards", 4, "Number of data shards for erasure coding")
@@ -154,4 +188,5 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(listCmd)
 }

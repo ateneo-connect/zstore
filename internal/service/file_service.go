@@ -61,7 +61,7 @@ func NewFileService(placer placement.Placer, metadataRepo MetadataRepository) *F
 	}
 }
 
-// UploadFile uploads a file to S3
+// UploadFile uploads a file across multiple cloud storage buckets
 func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool, dataShards, parityShards, concurrency int) error {
 	start := time.Now()
 
@@ -119,7 +119,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 	return err
 }
 
-// DownloadFile downloads a file from S3
+// DownloadFile downloads a file from cloud storage
 func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	// Get prefix and filename for metadata lookup
 	prefix := filepath.Dir(key)
@@ -150,7 +150,7 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 	return io.NopCloser(bytes.NewReader(reconstructedData)), nil
 }
 
-// DeleteFile deletes a file from S3
+// DeleteFile deletes a file from cloud storage
 func (s *FileService) DeleteFile(ctx context.Context, key string) error {
 	// Delete all shards using prefix from all buckets
 	log.Debugf("Deleting Key %s", key)
@@ -180,9 +180,9 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 	errorCh := make(chan error, len(shards)) // Buffered to prevent goroutine blocking
 	pathCh := make(chan struct {             // Channel for successful upload results
 		index       int    // Shard index for metadata update
-		storageType string // Storage backend type (e.g., "s3")
-		bucketName  string // S3 bucket name
-		key         string // Actual S3 key where shard was stored
+		storageType string // Storage backend type (e.g., "s3", "gcs")
+		bucketName  string // Cloud storage bucket name
+		key         string // Actual storage key where shard was stored
 	}, len(shards))
 	semaphore := make(chan struct{}, concurrency) // Limits concurrent uploads
 
@@ -428,6 +428,11 @@ func (s *FileService) maybeStartNext(wg *sync.WaitGroup, mu *sync.Mutex, shards 
 	}
 	// If conditions not met, no new download is started, allowing
 	// the system to naturally wind down as remaining downloads complete
+}
+
+// ListFiles lists all files stored under a given prefix
+func (s *FileService) ListFiles(ctx context.Context, prefix string) ([]domain.ObjectMetadata, error) {
+	return s.metadataRepo.ListMetadataByPrefix(ctx, prefix)
 }
 
 // SetConcurrency sets the concurrency limit for uploads

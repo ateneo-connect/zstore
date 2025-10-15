@@ -6,9 +6,40 @@ skinparam ranksep 100
 title Zstore - Erasure Coding File Storage System
 
 package "CLI Layer" #E1F5FE {
-  class uploadCmd <<cobra.Command>>
-  class downloadCmd <<cobra.Command>>
-  class deleteCmd <<cobra.Command>>
+  class rootCmd <<cobra.Command>> {
+    +Execute()
+  }
+  class uploadCmd <<cobra.Command>> {
+    +Run()
+    +parseZsURL()
+  }
+  class downloadCmd <<cobra.Command>> {
+    +Run()
+    +parseZsURL()
+  }
+  class deleteCmd <<cobra.Command>> {
+    +Run()
+    +parseZsURL()
+  }
+  class initCmd <<cobra.Command>> {
+    +runInitCommand()
+  }
+  class downCmd <<cobra.Command>> {
+    +runDownCommand()
+  }
+}
+
+package "Configuration Layer" #E3F2FD {
+  class Config {
+    +LoadConfig()
+    +AwsConfig: aws.Config
+    +GcsClient: *storage.Client
+    +Buckets: map[string]BucketConfig
+  }
+  class BucketConfig {
+    +BucketName: string
+    +Platform: string
+  }
 }
 
 package "Service Layer" #F3E5F5 {
@@ -16,23 +47,30 @@ package "Service Layer" #F3E5F5 {
     +UploadFile()
     +DownloadFile()
     +DeleteFile()
-  }
-  
-  class ErasureCoding {
     +ShardFile()
     +ReconstructFile()
-    +ReedSolomon
+    +uploadShards()
+    +downloadShards()
+  }
+  
+  class RawFileService {
+    +UploadFileRaw()
+    +DownloadFileRaw()
   }
 }
 
 package "Placement Layer" #F0F4C3 {
   interface Placer {
-    +SelectBucketForUpload()
+    +Place(shardIndex int)
     +GetRepositoryForBucket()
+    +RegisterBucket()
+    +ListBuckets()
   }
   
   class RoundRobinPlacer {
+    +Place(shardIndex int)
     +RegisterBucket()
+    +GetRepositoryForBucket()
     +ListBuckets()
   }
 }
@@ -43,22 +81,42 @@ package "Repository Layer" #E8F5E8 {
     +ParseBucketConfig()
   }
   
+  interface ObjectRepository {
+    +Upload()
+    +Download()
+    +Delete()
+    +DeletePrefix()
+    +GetBucketName()
+    +GetStorageType()
+  }
+  
   class S3ObjectRepository {
     +Upload()
     +Download()
     +DeletePrefix()
+    +GetBucketName()
+    +GetStorageType()
   }
   
   class GCSObjectRepository {
     +Upload()
     +Download()
     +DeletePrefix()
+    +GetBucketName()
+    +GetStorageType()
   }
   
   class MetadataRepository {
     +CreateMetadata()
     +GetMetadata()
     +DeleteMetadata()
+    +ListMetadataByPrefix()
+    +UpdateMetadata()
+  }
+  
+  class Database {
+    +MigrateDb()
+    +MigrateDown()
   }
 }
 
@@ -66,42 +124,66 @@ package "Domain Layer" #FFF3E0 {
   class ObjectMetadata {
     +Prefix: string
     +FileName: string
+    +OriginalSize: int64
+    +ShardSize: int64
+    +ParityShards: int
     +ShardHashes: []ShardStorage
   }
   
   class ShardStorage {
     +Hash: string
+    +StorageType: string
     +BucketName: string
+    +Key: string
   }
 }
 
 package "External Systems" #FFEBEE {
   database "S3 Buckets" as S3
   database "GCS Buckets" as GCS
-  database "NoSQL DB" as NoSQL
+  database "DynamoDB" as DynamoDB
 }
 
 ' Main connections
-uploadCmd --> FileService : upload
-downloadCmd --> FileService : download
-deleteCmd --> FileService : delete
+rootCmd --> uploadCmd
+rootCmd --> downloadCmd
+rootCmd --> deleteCmd
+rootCmd --> initCmd
+rootCmd --> downCmd
 
-FileService --> ErasureCoding : encode
-FileService --> Placer 
-FileService --> MetadataRepository : metadata
+uploadCmd --> FileService : upload
+uploadCmd --> RawFileService : raw upload
+downloadCmd --> FileService : download
+downloadCmd --> RawFileService : raw download
+deleteCmd --> FileService : delete
+initCmd --> Database : migrate
+downCmd --> Database : rollback
+
+rootCmd --> Config : load config
+Config --> BucketConfig
+
+FileService --> Placer : place shards
+FileService --> MetadataRepository : metadata ops
+RawFileService --> ObjectRepository : direct ops
 
 RoundRobinPlacer ..|> Placer
-Placer --> ObjectRepositoryFactory : create repos
+Placer --> ObjectRepository : get repo
+ObjectRepositoryFactory --> ObjectRepository : creates
 ObjectRepositoryFactory --> S3ObjectRepository : creates
 ObjectRepositoryFactory --> GCSObjectRepository : creates
+
+S3ObjectRepository ..|> ObjectRepository
+GCSObjectRepository ..|> ObjectRepository
+
 S3ObjectRepository --> S3 : store shards
 GCSObjectRepository --> GCS : store shards
-MetadataRepository --> NoSQL
+MetadataRepository --> DynamoDB : store metadata
+Database --> DynamoDB : migrations
 
 FileService --> ObjectMetadata
 ObjectMetadata --> ShardStorage
 
-note top of uploadCmd : **Upload Flow:**\n1. CLI → FileService\n2. Erasure encode\n3. Select buckets\n4. Upload shards\n5. Store metadata
+note top of uploadCmd : **Upload Flow:**\n1. CLI → FileService\n2. ShardFile() (Reed-Solomon)\n3. Place() shards via Placer\n4. Upload shards in parallel\n5. Store metadata
 
-note bottom of NoSQL : **Download Flow:**\n1. Get metadata\n2. Download shards\n3. Reconstruct file
+note bottom of DynamoDB : **Download Flow:**\n1. Get metadata from DynamoDB\n2. Download shards dynamically\n3. ReconstructFile() from shards
 @enduml
