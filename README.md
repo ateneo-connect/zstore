@@ -30,9 +30,9 @@ git show v0.1.0-stable
 - [x] **Add raw bucket selection flag** for specifying which bucket to use for `--no-erasure-coding` operations
 
 ### Testing & Quality
-- [ ] **Fix Tests:** Update benchmark tests to use placement.Placer instead of direct S3ObjectRepository
-- [ ] **Fix Tests:** Update integration tests to use new placement-based FileService constructor
-- [ ] **Fix Tests:** Update all tests to reflect new multi-provider architecture and placement system
+- [x] **Fix Tests:** Update benchmark tests to use placement.Placer instead of direct S3ObjectRepository
+- [x] **Fix Tests:** Update integration tests to use new placement-based FileService constructor
+- [x] **Fix Tests:** Update all tests to reflect new multi-provider architecture and placement system
 
 ### Performance & User Experience
 - [x] **Make download concurrent** for improved performance with configurable concurrency

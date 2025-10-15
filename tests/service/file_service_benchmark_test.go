@@ -5,36 +5,57 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"os"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/zzenonn/zstore/internal/config"
+	"github.com/zzenonn/zstore/internal/placement"
 	"github.com/zzenonn/zstore/internal/repository/db"
 	"github.com/zzenonn/zstore/internal/repository/objectstore"
 	"github.com/zzenonn/zstore/internal/service"
 )
 
-func BenchmarkFileService_UploadFile(b *testing.B) {
-	// Load config
-	cfg, err := config.LoadConfig()
+func setupTestServices(b *testing.B) (*service.FileService, *config.Config) {
+	rootCmd := &cobra.Command{}
+	configPath := os.Getenv("ZSTORE_CONFIG_PATH")
+	if configPath == "" {
+		b.Fatalf("ZSTORE_CONFIG_PATH environment variable must be set")
+	}
+	cfg, err := config.LoadConfig(configPath, rootCmd)
 	if err != nil {
 		b.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Initialize database
-	dynamoDb, err := db.NewDatabase(cfg)
+	dynamoDb, err := db.NewDatabase(cfg.AwsConfig)
 	if err != nil {
 		b.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	// Initialize repositories
-	s3Store := objectstore.NewS3ObjectStore(cfg)
-	s3ObjectRepository := objectstore.NewS3ObjectRepository(s3Store.Client, cfg.S3BucketName)
-	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
-	
-	// Initialize file service
-	fileService := service.NewFileService(&s3ObjectRepository, &metadataRepository)
+	factory := objectstore.NewObjectRepositoryFactory(cfg.AwsConfig, cfg.GcsClient)
+	placer := placement.NewRoundRobinPlacer()
 
-	// Test data sizes
+	for bucketKey, bucketConfig := range cfg.Buckets {
+		repoConfig := objectstore.BucketConfig{
+			Name: bucketConfig.BucketName,
+			Type: objectstore.RepositoryType(bucketConfig.Platform),
+		}
+		repo, err := factory.CreateRepository(repoConfig)
+		if err != nil {
+			b.Fatalf("Failed to create repository: %v", err)
+		}
+		placer.RegisterBucket(bucketKey, repo)
+	}
+
+	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
+	fileService := service.NewFileService(placer, &metadataRepository)
+
+	return fileService, cfg
+}
+
+func BenchmarkFileService_UploadFile(b *testing.B) {
+	fileService, _ := setupTestServices(b)
+
 	testSizes := []struct {
 		name string
 		size int
@@ -48,7 +69,6 @@ func BenchmarkFileService_UploadFile(b *testing.B) {
 
 	for _, size := range testSizes {
 		b.Run(size.name, func(b *testing.B) {
-			// Generate test data
 			data := make([]byte, size.size)
 			rand.Read(data)
 
@@ -64,7 +84,6 @@ func BenchmarkFileService_UploadFile(b *testing.B) {
 					b.Fatalf("UploadFile failed: %v", err)
 				}
 
-				// Clean up
 				fileService.DeleteFile(context.Background(), key)
 			}
 		})
@@ -72,27 +91,8 @@ func BenchmarkFileService_UploadFile(b *testing.B) {
 }
 
 func BenchmarkFileService_DownloadFile(b *testing.B) {
-	// Load config
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		b.Fatalf("Failed to load config: %v", err)
-	}
+	fileService, _ := setupTestServices(b)
 
-	// Initialize database
-	dynamoDb, err := db.NewDatabase(cfg)
-	if err != nil {
-		b.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	// Initialize repositories
-	s3Store := objectstore.NewS3ObjectStore(cfg)
-	s3ObjectRepository := objectstore.NewS3ObjectRepository(s3Store.Client, cfg.S3BucketName)
-	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
-	
-	// Initialize file service
-	fileService := service.NewFileService(&s3ObjectRepository, &metadataRepository)
-
-	// Test data sizes
 	testSizes := []struct {
 		name string
 		size int
@@ -106,7 +106,6 @@ func BenchmarkFileService_DownloadFile(b *testing.B) {
 
 	for _, size := range testSizes {
 		b.Run(size.name, func(b *testing.B) {
-			// Setup: Upload test file
 			data := make([]byte, size.size)
 			rand.Read(data)
 			key := "benchmark/download-test-file"
@@ -127,41 +126,20 @@ func BenchmarkFileService_DownloadFile(b *testing.B) {
 				reader.Close()
 			}
 
-			// Cleanup
 			fileService.DeleteFile(context.Background(), key)
 		})
 	}
 }
 
 func BenchmarkFileService_ConcurrencyComparison(b *testing.B) {
-	// Load config
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		b.Fatalf("Failed to load config: %v", err)
-	}
+	fileService, _ := setupTestServices(b)
 
-	// Initialize database
-	dynamoDb, err := db.NewDatabase(cfg)
-	if err != nil {
-		b.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	// Initialize repositories
-	s3Store := objectstore.NewS3ObjectStore(cfg)
-	s3ObjectRepository := objectstore.NewS3ObjectRepository(s3Store.Client, cfg.S3BucketName)
-	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
-
-	// Test different concurrency levels
 	concurrencyLevels := []int{1, 2, 3, 5}
-	
-	// 1MB test data
 	data := make([]byte, 1024*1024)
 	rand.Read(data)
 
 	for _, concurrency := range concurrencyLevels {
 		b.Run(fmt.Sprintf("Concurrency_%d", concurrency), func(b *testing.B) {
-			fileService := service.NewFileService(&s3ObjectRepository, &metadataRepository)
-			// Set concurrency directly on the struct field
 			fileService.SetConcurrency(concurrency)
 
 			b.ResetTimer()
@@ -176,7 +154,6 @@ func BenchmarkFileService_ConcurrencyComparison(b *testing.B) {
 					b.Fatalf("UploadFile failed: %v", err)
 				}
 
-				// Clean up
 				fileService.DeleteFile(context.Background(), key)
 			}
 		})
