@@ -1,39 +1,170 @@
 # Zstore
 
-## Git Checkpoints
+A multi-provider erasure coding object storage system that distributes file shards across multiple cloud storage backends (S3, GCS) for fault tolerance and performance.
 
-### Stable Checkpoint: v0.1.0-stable
-This tag marks a stable version with separate upload/download functions before experimental work.
+## Quick Start
 
-**To restore to this checkpoint:**
-```bash
-git checkout v0.1.0-stable
+### 1. Configuration
+
+Create a `config.yaml` file:
+
+```yaml
+# Zstore Configuration File
+log_level: info
+dynamodb_table: object_metadata
+
+# Multi-bucket configuration
+buckets:
+  primary:
+    bucket_name: my-gcs-bucket
+    platform: gcs
+  secondary:
+    bucket_name: my-s3-bucket
+    platform: s3
 ```
 
-**To create a new branch from this tag:**
+### 2. Environment Setup
+
 ```bash
-git checkout -b restore-stable v0.1.0-stable
+# Set config file path
+export ZSTORE_CONFIG_PATH=/path/to/your/config.yaml
+
+# AWS credentials (for S3 and DynamoDB)
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+export AWS_REGION=us-east-1
+
+# GCS credentials (for GCS buckets)
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ```
 
-**To see tag details:**
+### 3. Initialize Database
+
 ```bash
-git show v0.1.0-stable
+./zstore init
 ```
 
-## TODOs
+### 4. Basic Usage
 
-### Architecture & Code Organization
-- [x] **Separate RoundRobinPlacer into its own file** (`internal/placement/round_robin.go`)
-- [x] **Remove obsolete storage_router.go** from service package
-- [x] **Create config file logic** for persistent configuration management
-- [x] **Implement list zs** command for listing stored files
-- [x] **Add raw bucket selection flag** for specifying which bucket to use for `--no-erasure-coding` operations
+```bash
+# Upload a file with erasure coding (default: 4 data + 2 parity shards)
+./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt
 
-### Testing & Quality
-- [x] **Fix Tests:** Update benchmark tests to use placement.Placer instead of direct S3ObjectRepository
-- [x] **Fix Tests:** Update integration tests to use new placement-based FileService constructor
-- [x] **Fix Tests:** Update all tests to reflect new multi-provider architecture and placement system
+# Upload with custom shard configuration
+./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --data-shards 6 --parity-shards 3
 
-### Performance & User Experience
-- [x] **Make download concurrent** for improved performance with configurable concurrency
-- [x] **Remove S3 references** from code comments and flags since the system now supports multiple providers
+# Upload without erasure coding (raw file)
+./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --no-erasure-coding
+
+# Download a file
+./zstore download zs://my-bucket/path/file.txt /path/to/output.txt
+
+# Download with custom concurrency
+./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --concurrency 5
+
+# List files in a bucket/prefix
+./zstore list zs://my-bucket/path/
+
+# Delete a file
+./zstore delete zs://my-bucket/path/file.txt
+```
+
+## Configuration
+
+### Config File Format
+
+The `config.yaml` file supports:
+
+```yaml
+# Logging level (debug, info, warn, error)
+log_level: info
+
+# DynamoDB table for metadata storage
+dynamodb_table: object_metadata
+
+# Storage buckets configuration
+buckets:
+  bucket_key_1:
+    bucket_name: actual-bucket-name
+    platform: s3  # or gcs
+  bucket_key_2:
+    bucket_name: another-bucket
+    platform: gcs
+```
+
+### Supported Platforms
+
+- **s3**: Amazon S3 buckets
+- **gcs**: Google Cloud Storage buckets
+
+### Multi-Provider Setup
+
+Zstore automatically distributes shards across all configured buckets using round-robin placement:
+
+- **Shard 0** → bucket_key_1
+- **Shard 1** → bucket_key_2  
+- **Shard 2** → bucket_key_1
+- **Shard 3** → bucket_key_2
+- etc.
+
+## Features
+
+### Erasure Coding
+- **Reed-Solomon encoding** for fault tolerance
+- **Configurable shards**: Choose data and parity shard counts
+- **Automatic reconstruction** from available shards
+- **Integrity verification** using CRC64 hashes
+
+### Multi-Provider Storage
+- **Cross-cloud distribution** (mix S3 and GCS)
+- **Round-robin placement** for load balancing
+- **Fault tolerance** across providers
+- **Cost optimization** through provider diversity
+
+### Performance
+- **Concurrent uploads/downloads** with configurable concurrency
+- **Dynamic concurrency control** for optimal performance
+- **Early termination** when sufficient shards are available
+- **Progress indicators** for large file operations
+
+## Testing
+
+### Running Tests
+
+```bash
+# Set config file for tests
+export ZSTORE_CONFIG_PATH=/path/to/test-config.yaml
+
+# Run integration tests
+go test ./tests/service/
+
+# Run benchmarks
+go test -bench=. ./tests/service/
+```
+
+### Test Configuration
+
+Tests require the `ZSTORE_CONFIG_PATH` environment variable to be set. Create a test-specific config file with test buckets.
+
+## Architecture
+
+### Components
+
+- **Placement System**: Distributes shards across multiple storage backends
+- **Erasure Coding Service**: Reed-Solomon encoding/decoding
+- **Object Repositories**: S3 and GCS storage implementations
+- **Metadata Repository**: DynamoDB for file reconstruction metadata
+- **File Service**: High-level file operations with erasure coding
+- **Raw File Service**: Direct storage operations without erasure coding
+
+### Data Flow
+
+1. **Upload**: File → Shards → Distribute across buckets → Store metadata
+2. **Download**: Retrieve metadata → Download shards → Verify integrity → Reconstruct file
+3. **Delete**: Remove shards from all buckets → Delete metadata
+
+## Documentation
+
+- [Architecture Diagrams](docs/): PlantUML diagrams showing system architecture
+- [TODOs](docs/TODO.md): Development tasks and feature roadmap
+- [Git Checkpoints](docs/GIT_CHECKPOINTS.md): Stable version tags and restore instructions

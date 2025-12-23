@@ -43,3 +43,4 @@ docker-compose.override.yml
 
 # Taskfile logs and temp files
 Taskfile.dist.yml
+config.yaml
