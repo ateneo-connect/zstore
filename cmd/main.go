@@ -100,20 +100,19 @@ func initConfig() {
 	if err != nil {
 		log.Fatalf("Failed to connect to the database: %v", err)
 	}
-	placer, rawRepo := initRepositories(cfg.AwsConfig, cfg.GcsClient, cfg.Buckets)
+	placer := initRepositories(cfg.AwsConfig, cfg.GcsClient, cfg.Buckets)
 	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
 
 	fileService = service.NewFileService(placer, &metadataRepository)
-	rawFileService = service.NewRawFileService(rawRepo)
+	rawFileService = service.NewRawFileService(cfg.AwsConfig)
 }
 
 // initRepositories initializes the placement system and repositories
-func initRepositories(awsConfig aws.Config, gcsClient *storage.Client, buckets map[string]config.BucketConfig) (placement.Placer, objectstore.ObjectRepository) {
+func initRepositories(awsConfig aws.Config, gcsClient *storage.Client, buckets map[string]config.BucketConfig) placement.Placer {
 	// Create factory that can build S3 and GCS repositories
 	factory := objectstore.NewObjectRepositoryFactory(awsConfig, gcsClient)
 	// Create round-robin placer for distributing shards across buckets
 	placer := placement.NewRoundRobinPlacer()
-	var rawRepo objectstore.ObjectRepository
 
 	// Register each configured bucket with the placer
 	for bucketKey, bucketConfig := range buckets {
@@ -121,14 +120,10 @@ func initRepositories(awsConfig aws.Config, gcsClient *storage.Client, buckets m
 		if repo != nil {
 			// Add repository to placement system
 			placer.RegisterBucket(bucketKey, repo)
-			// Use first successful repository for raw file service
-			if rawRepo == nil {
-				rawRepo = repo
-			}
 		}
 	}
 
-	return placer, rawRepo
+	return placer
 }
 
 // createRepository creates a single repository from bucket configuration

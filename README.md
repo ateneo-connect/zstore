@@ -57,7 +57,10 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --data-shards 6 --parity-shards 3
 
 # Upload without erasure coding (raw file)
-./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --no-erasure-coding
+./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt
+
+# Upload raw file in quiet mode
+./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt --quiet
 
 # Upload in quiet mode (suppress progress bars)
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --quiet
@@ -67,6 +70,12 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 # Download with custom concurrency
 ./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --concurrency 5
+
+# Download without erasure coding (raw file)
+./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt
+
+# Download raw file in quiet mode
+./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt --quiet
 
 # Download in quiet mode
 ./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --quiet
@@ -87,11 +96,13 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 - `--data-shards`: Number of data shards for erasure coding (default: 4)
 - `--parity-shards`: Number of parity shards for erasure coding (default: 2)
 - `--concurrency`: Number of concurrent shard uploads (default: 3)
-- `--no-erasure-coding`: Upload file directly without erasure coding
 
 ### Download Options
 - `--concurrency`: Number of concurrent shard downloads (default: 3)
-- `--no-erasure-coding`: Download file directly without erasure coding reconstruction
+
+### Raw Operations
+- `upload-raw`: Upload files directly to S3 without erasure coding (uses s3:// URLs, supports --quiet)
+- `download-raw`: Download files directly from S3 without erasure coding (uses s3:// URLs, supports --quiet)
 
 ## Configuration
 
