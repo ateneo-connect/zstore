@@ -38,6 +38,16 @@ type Config struct {
 // LoadConfig loads configuration from config.yaml, environment variables, or CLI flags
 // Priority: CLI flags > Environment variables > config.yaml > defaults
 func LoadConfig(configPath string, rootCmd *cobra.Command) (*Config, error) {
+	// Enable automatic environment variable reading first
+	viper.AutomaticEnv()
+	
+	// Check for ZSTORE_CONFIG_PATH environment variable if no config path provided
+	if configPath == "" {
+		if envPath := viper.GetString("ZSTORE_CONFIG_PATH"); envPath != "" {
+			configPath = envPath
+		}
+	}
+	
 	if err := setupViper(configPath, rootCmd); err != nil {
 		return nil, err
 	}
