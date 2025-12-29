@@ -113,3 +113,17 @@ func (r *RawFileService) DownloadFileRaw(ctx context.Context, bucketName, key st
 	
 	return result.Body, nil
 }
+
+// DeleteFileRaw deletes a file directly from S3 without erasure coding
+func (r *RawFileService) DeleteFileRaw(ctx context.Context, bucketName, key string) error {
+	log.Debugf("Deleting raw file %s from bucket %s", key, bucketName)
+	
+	// Create S3 client
+	s3Client := s3.NewFromConfig(r.awsConfig)
+	
+	_, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: &bucketName,
+		Key:    &key,
+	})
+	return err
+}

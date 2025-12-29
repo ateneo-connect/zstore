@@ -85,6 +85,9 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 # Delete a file
 ./zstore delete zs://my-bucket/path/file.txt
+
+# Delete a raw file
+./zstore delete-raw s3://my-bucket/path/file.txt
 ```
 
 ## Command Options
@@ -103,6 +106,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ### Raw Operations
 - `upload-raw`: Upload files directly to S3 without erasure coding (uses s3:// URLs, supports --quiet)
 - `download-raw`: Download files directly from S3 without erasure coding (uses s3:// URLs, supports --quiet)
+- `delete-raw`: Delete files directly from S3 without erasure coding (uses s3:// URLs)
 
 ## Configuration
 

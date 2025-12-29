@@ -251,6 +251,29 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
+var deleteRawCmd = &cobra.Command{
+	Use:   "delete-raw [s3://bucket/prefix/object]",
+	Short: "Delete a file directly without erasure coding",
+	Args:  cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		s3URL := args[0]
+
+		// Parse s3:// URL to extract bucket and key
+		bucket, key, err := parseS3URL(s3URL)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			return
+		}
+
+		err = rawFileService.DeleteFileRaw(context.Background(), bucket, key)
+		if err != nil {
+			fmt.Printf("Error deleting file: %v\n", err)
+			return
+		}
+		fmt.Printf("File deleted successfully: s3://%s/%s\n", bucket, key)
+	},
+}
+
 var listCmd = &cobra.Command{
 	Use:   "list [zs://bucket/prefix]",
 	Short: "List files in cloud storage",
@@ -300,5 +323,6 @@ func init() {
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(downloadRawCmd)
 	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(deleteRawCmd)
 	rootCmd.AddCommand(listCmd)
 }
