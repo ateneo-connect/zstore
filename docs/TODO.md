@@ -16,3 +16,5 @@
 - [x] **Make download concurrent** for improved performance with configurable concurrency
 - [x] **Remove S3 references** from code comments and flags since the system now supports multiple providers
 - [x] **Auto-detect filename**: If destination filename is not specified, use the source filename
+- [x] **Add support for multiple storage prefixes**: Implemented s3:// support for raw operations via upload-raw/download-raw commands
+- [ ] **Add support for GCS and Azure**: Extend raw operations beyond S3 to support gs://, azure://, etc.
