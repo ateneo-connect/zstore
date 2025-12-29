@@ -47,8 +47,11 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 ### 4. Basic Usage
 
 ```bash
-# Upload a file with erasure coding (default: 4 data + 2 parity shards)
+# Upload a file with erasure coding (default: 4 data + 2 parity shards, concurrency 3)
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt
+
+# Upload with auto-detected filename to specific prefix
+./zstore upload /path/to/file.txt zs://my-bucket/folder/
 
 # Upload with custom shard configuration
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --data-shards 6 --parity-shards 3
@@ -56,11 +59,17 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 # Upload without erasure coding (raw file)
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --no-erasure-coding
 
-# Download a file
+# Upload in quiet mode (suppress progress bars)
+./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --quiet
+
+# Download a file (default concurrency 3)
 ./zstore download zs://my-bucket/path/file.txt /path/to/output.txt
 
 # Download with custom concurrency
 ./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --concurrency 5
+
+# Download in quiet mode
+./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --quiet
 
 # List files in a bucket/prefix
 ./zstore list zs://my-bucket/path/
@@ -68,6 +77,21 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 # Delete a file
 ./zstore delete zs://my-bucket/path/file.txt
 ```
+
+## Command Options
+
+### Global Options
+- `--quiet, -q`: Suppress progress bars and verbose output
+
+### Upload Options
+- `--data-shards`: Number of data shards for erasure coding (default: 4)
+- `--parity-shards`: Number of parity shards for erasure coding (default: 2)
+- `--concurrency`: Number of concurrent shard uploads (default: 3)
+- `--no-erasure-coding`: Upload file directly without erasure coding
+
+### Download Options
+- `--concurrency`: Number of concurrent shard downloads (default: 3)
+- `--no-erasure-coding`: Download file directly without erasure coding reconstruction
 
 ## Configuration
 

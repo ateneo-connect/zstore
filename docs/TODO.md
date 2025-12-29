@@ -15,4 +15,4 @@
 ## Performance & User Experience
 - [x] **Make download concurrent** for improved performance with configurable concurrency
 - [x] **Remove S3 references** from code comments and flags since the system now supports multiple providers
-- [ ] **Auto-detect filename**: If destination filename is not specified, use the source filename and bucket root.
+- [x] **Auto-detect filename**: If destination filename is not specified, use the source filename

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -219,5 +220,50 @@ func TestFileService_EmptyFile(t *testing.T) {
 	err := fileService.UploadFile(context.Background(), key, bytes.NewReader(originalData), true, 4, 2, 3)
 	if err == nil {
 		t.Error("Expected UploadFile to fail for empty file, but it succeeded")
+	}
+}
+
+func TestFileService_AutoDetectFilename(t *testing.T) {
+	fileService := setupFileService(t)
+	
+	// Create test data
+	originalData := make([]byte, 1024)
+	_, err := rand.Read(originalData)
+	if err != nil {
+		t.Fatalf("Failed to generate test data: %v", err)
+	}
+	originalHash := sha256.Sum256(originalData)
+	
+	// Test with source filename "test-file.txt" - should auto-detect to "test-file.txt" in bucket root
+	sourceFilename := "test-file.txt"
+	expectedKey := filepath.Base(sourceFilename) // This simulates CLI auto-detection logic
+	
+	// Upload with auto-detected filename (simulating CLI behavior)
+	err = fileService.UploadFile(context.Background(), expectedKey, bytes.NewReader(originalData), true, 4, 2, 3)
+	if err != nil {
+		t.Fatalf("UploadFile failed: %v", err)
+	}
+	
+	// Download using the expected key
+	reader, err := fileService.DownloadFile(context.Background(), expectedKey, true)
+	if err != nil {
+		t.Fatalf("DownloadFile failed: %v", err)
+	}
+	defer reader.Close()
+	
+	downloadedData, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded data: %v", err)
+	}
+	
+	downloadedHash := sha256.Sum256(downloadedData)
+	if originalHash != downloadedHash {
+		t.Errorf("Data integrity check failed: original hash %x != downloaded hash %x", originalHash, downloadedHash)
+	}
+	
+	// Cleanup
+	err = fileService.DeleteFile(context.Background(), expectedKey)
+	if err != nil {
+		t.Fatalf("DeleteFile failed: %v", err)
 	}
 }

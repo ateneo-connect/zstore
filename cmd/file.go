@@ -23,16 +23,28 @@ func parseZsURL(zsURL string) (string, error) {
 
 var uploadCmd = &cobra.Command{
 	Use:   "upload [file-path] [zs://bucket/prefix/object]",
-	Short: "Upload a file to cloud storage",
-	Args:  cobra.ExactArgs(2),
+	Short: "Upload a file to cloud storage (destination optional - uses filename if not specified)",
+	Args:  cobra.RangeArgs(1, 2),
 	Run: func(cmd *cobra.Command, args []string) {
-		filePath, zsURL := args[0], args[1]
-
-		// Parse zs:// URL to extract key
-		key, err := parseZsURL(zsURL)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-			return
+		filePath := args[0]
+		
+		// Auto-detect destination if not provided or if destination ends with /
+		var key string
+		if len(args) == 2 {
+			// Parse zs:// URL to extract key
+			var err error
+			key, err = parseZsURL(args[1])
+			if err != nil {
+				fmt.Printf("Error: %v\n", err)
+				return
+			}
+			// If key ends with /, append filename
+			if strings.HasSuffix(key, "/") {
+				key = key + filepath.Base(filePath)
+			}
+		} else {
+			// Use source filename as destination key
+			key = filepath.Base(filePath)
 		}
 
 		file, err := os.Open(filePath)
@@ -157,6 +169,9 @@ var listCmd = &cobra.Command{
 			fmt.Printf("Error: %v\n", err)
 			return
 		}
+		
+		// Remove trailing slash for consistent prefix matching
+		prefix = strings.TrimSuffix(prefix, "/")
 		
 		files, err := fileService.ListFiles(context.Background(), prefix)
 		if err != nil {
