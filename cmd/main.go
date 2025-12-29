@@ -49,6 +49,23 @@ var initCmd = &cobra.Command{
 	Run:   runInitCommand,
 }
 
+var debugCmd = &cobra.Command{
+	Use:   "debug",
+	Short: "Show configuration for debugging",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Printf("Configuration:\n")
+		fmt.Printf("  Log Level: %s\n", cfg.LogLevel)
+		fmt.Printf("  DynamoDB Table: %s\n", cfg.DynamoDBTable)
+		fmt.Printf("  AWS Region: %s\n", cfg.AwsConfig.Region)
+		fmt.Printf("\nBuckets:\n")
+		for key, bucket := range cfg.Buckets {
+			fmt.Printf("  %s:\n", key)
+			fmt.Printf("    Name: %s\n", bucket.BucketName)
+			fmt.Printf("    Platform: %s\n", bucket.Platform)
+		}
+	},
+}
+
 var downCmd = &cobra.Command{
 	Use:   "down",
 	Short: "Roll back database migrations",
@@ -153,6 +170,7 @@ func init() {
 func addCommands() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(downCmd)
+	rootCmd.AddCommand(debugCmd)
 }
 
 func main() {

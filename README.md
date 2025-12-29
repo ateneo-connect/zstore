@@ -46,8 +46,11 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 ### 4. Basic Usage
 
+#### Upload Commands
+
+**Upload with Erasure Coding (default: 4 data + 2 parity shards, concurrency 3)**
 ```bash
-# Upload a file with erasure coding (default: 4 data + 2 parity shards, concurrency 3)
+# Upload a file with erasure coding
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt
 
 # Upload with auto-detected filename to specific prefix
@@ -56,44 +59,70 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 # Upload with custom shard configuration
 ./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --data-shards 6 --parity-shards 3
 
+# Upload in quiet mode (suppress progress bars)
+./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --quiet
+```
+
+**Upload Raw Files (without erasure coding)**
+```bash
 # Upload without erasure coding (raw file)
 ./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt
 
 # Upload raw file in quiet mode
 ./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt --quiet
+```
 
-# Upload in quiet mode (suppress progress bars)
-./zstore upload /path/to/file.txt zs://my-bucket/path/file.txt --quiet
+#### Download Commands
 
-# Download a file (default concurrency 3)
+**Download with Erasure Coding (default concurrency: 3)**
+```bash
+# Download a file with erasure coding reconstruction
 ./zstore download zs://my-bucket/path/file.txt /path/to/output.txt
 
 # Download with custom concurrency
 ./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --concurrency 5
 
+# Download in quiet mode
+./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --quiet
+```
+
+**Download Raw Files (without erasure coding)**
+```bash
 # Download without erasure coding (raw file)
 ./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt
 
 # Download raw file in quiet mode
 ./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt --quiet
+```
 
-# Download in quiet mode
-./zstore download zs://my-bucket/path/file.txt /path/to/output.txt --quiet
+#### Delete Commands
 
-# List files in a bucket/prefix
-./zstore list zs://my-bucket/path/
-
-# Delete a file
+**Delete with Erasure Coding**
+```bash
+# Delete a file (removes all shards and metadata)
 ./zstore delete zs://my-bucket/path/file.txt
+```
 
+**Delete Raw Files**
+```bash
 # Delete a raw file
 ./zstore delete-raw s3://my-bucket/path/file.txt
+```
+
+#### List Commands
+
+```bash
+# List files in a bucket/prefix
+./zstore list zs://my-bucket/path/
 ```
 
 ## Command Options
 
 ### Global Options
 - `--quiet, -q`: Suppress progress bars and verbose output
+- `--config`: Config file path (default: ./config.yaml)
+- `--log-level`: Log level - debug, info, warn, error (default: info)
+- `--dynamodb-table`: DynamoDB table name (default: default-table)
 
 ### Upload Options
 - `--data-shards`: Number of data shards for erasure coding (default: 4)
