@@ -380,6 +380,7 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	log.Debugf("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
 
 	// Step 2: Create temp file for this shard
+	tempFileStart := time.Now()
 	tempFile, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
 	if err != nil {
 		tempFilePaths[i] = ""
@@ -387,19 +388,40 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 		return
 	}
 	tempFilePath := tempFile.Name()
+	log.Debugf("[PERF] Shard %d: Temp file creation took %v", i, time.Since(tempFileStart))
 
 	// Step 3: Download directly to temp file using WriterAt interface
 	downloadStart := time.Now()
 	err = repo.Download(ctx, shardInfo.Key, tempFile, quiet)
+	log.Debugf("[PERF] Shard %d: Download initiation took %v", i, time.Since(downloadStart))
 	tempFile.Close()
 	if err != nil {
 		// Mark shard as failed and potentially start next download
+		log.Errorf("Shard %d download failed: %v", i, err)
 		os.Remove(tempFilePath)
 		tempFilePaths[i] = ""
 		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
 		return
 	}
-	log.Debugf("[PERF] Shard %d: Download took %v", i, time.Since(downloadStart))
+
+	// Debug: Check file size after download
+	if fileInfo, err := os.Stat(tempFilePath); err == nil {
+		log.Debugf("[PERF] Shard %d: Downloaded file size: %d bytes", i, fileInfo.Size())
+	} else {
+		log.Errorf("Shard %d: Failed to stat temp file: %v", i, err)
+	}
+
+	// Copy temp file content for performance measurement
+	copyStart := time.Now()
+	shardData, err := os.ReadFile(tempFilePath)
+	if err != nil {
+		log.Errorf("Shard %d: Failed to read temp file: %v", i, err)
+		os.Remove(tempFilePath)
+		tempFilePaths[i] = ""
+		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		return
+	}
+	log.Debugf("[PERF] Shard %d: Copied %d bytes in %v (%.2f MB/s)", i, len(shardData), time.Since(copyStart), float64(len(shardData))/1024/1024/time.Since(copyStart).Seconds())
 
 	// Step 4: Verify shard integrity using CRC64 hash (DISABLED)
 	// This ensures downloaded data matches what was originally stored

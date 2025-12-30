@@ -78,6 +78,15 @@ func (r *GCSObjectRepository) Download(ctx context.Context, key string, dest io.
 		log.Debugf("Downloading from GCS: gs://%s/%s", r.bucketName, key)
 	}
 
+	// Get object attributes first to check size
+	bucket := r.client.Bucket(r.bucketName)
+	obj := bucket.Object(key)
+	attrs, err := obj.Attrs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get GCS object attributes: %w", err)
+	}
+	log.Debugf("GCS object %s size: %d bytes", key, attrs.Size)
+
 	// Initialize downloader if not already done
 	if r.downloader == nil {
 		var err error
@@ -95,10 +104,12 @@ func (r *GCSObjectRepository) Download(ctx context.Context, key string, dest io.
 	}
 
 	// Download object
-	err := r.downloader.DownloadObject(ctx, input)
+	log.Debugf("Starting GCS download for %s", key)
+	err = r.downloader.DownloadObject(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to download from GCS: %w", err)
 	}
+	log.Debugf("Completed GCS download for %s", key)
 
 	return nil
 }
