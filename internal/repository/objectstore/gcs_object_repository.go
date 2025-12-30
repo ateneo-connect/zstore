@@ -1,11 +1,13 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 
 	"cloud.google.com/go/storage"
+	"cloud.google.com/go/storage/transfermanager"
 	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
 )
@@ -16,8 +18,9 @@ type GCSObjectRepository struct {
 	bucketName string
 }
 
-// Upload uploads an object to GCS
+// Upload uploads an object to GCS using transfer manager
 func (r *GCSObjectRepository) Upload(ctx context.Context, key string, reader io.Reader, quiet bool) (string, error) {
+	// For upload, we'll use the regular writer but with optimized buffer
 	bucket := r.client.Bucket(r.bucketName)
 	obj := bucket.Object(key)
 
@@ -44,7 +47,9 @@ func (r *GCSObjectRepository) Upload(ctx context.Context, key string, reader io.
 		proxyReader = &pbReader
 	}
 
-	_, err := io.Copy(writer, proxyReader)
+	// Use large buffer for better performance
+	buf := make([]byte, 5*1024*1024) // 5 MiB buffer
+	_, err := io.CopyBuffer(writer, proxyReader, buf)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload to GCS: %w", err)
 	}
@@ -70,29 +75,61 @@ func (pr *progressReader) Close() error {
 	return pr.r.Close()
 }
 
-// Download downloads an object from GCS
+// Download downloads an object from GCS using transfer manager
 func (r *GCSObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
-	bucket := r.client.Bucket(r.bucketName)
-	obj := bucket.Object(key)
+	// Get object attributes to for progress bar size.
+	attrs, err := r.client.Bucket(r.bucketName).Object(key).Attrs(ctx)
+	if err != nil && !quiet {
+		log.Warnf("could not get object attributes for %s: %v. Progress bar will not show size.", key, err)
+	}
+
+	// Create transfer manager with optimized settings
+	downloader, err := transfermanager.NewDownloader(r.client,
+		transfermanager.WithWorkers(5),
+		transfermanager.WithPartSize(5*1024*1024), // 5 MiB
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create downloader: %w", err)
+	}
 
 	if !quiet {
 		log.Debugf("Downloading from GCS: gs://%s/%s", r.bucketName, key)
 	}
 
-	reader, err := obj.NewReader(ctx)
+	// Create download buffer
+	buf := transfermanager.NewDownloadBuffer(nil)
+
+	// Download using transfer manager
+	input := &transfermanager.DownloadObjectInput{
+		Bucket:      r.bucketName,
+		Object:      key,
+		Destination: buf,
+	}
+
+	err = downloader.DownloadObject(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download from GCS: %w", err)
+		return nil, fmt.Errorf("failed to start download from GCS: %w", err)
 	}
 
-	if quiet {
-		return reader, nil
+	results, err := downloader.WaitAndClose()
+	if err != nil {
+		// one of the downloads failed.
+		return nil, fmt.Errorf("a download failed: %w", err)
+	}
+	if len(results) > 0 && results[0].Err != nil {
+		return nil, fmt.Errorf("failed to download object %s: %w", results[0].Object, results[0].Err)
 	}
 
-	// Get object attributes for progress bar
-	attrs, err := obj.Attrs(ctx)
+	// Get progress bar if not quiet
 	var bar *progressbar.ProgressBar
-	if err == nil {
+	if !quiet && attrs != nil {
 		bar = progressbar.DefaultBytes(attrs.Size, "downloading")
+	}
+
+	// Return reader with optional progress
+	reader := io.NopCloser(bytes.NewReader(buf.Bytes()))
+	if quiet || bar == nil {
+		return reader, nil
 	}
 
 	return &progressReader{r: reader, bar: bar}, nil
