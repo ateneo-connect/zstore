@@ -300,7 +300,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 		}
 
 		shardStart := time.Now()
-		log.Infof("[PERF] Starting shard %d download at %v", i, shardStart)
+		log.Infof("[PERF] Starting shard %d download: bucket=%s, key=%s", i, shardInfo.BucketName, shardInfo.Key)
 
 		// Try to download this shard
 		repoStart := time.Now()
