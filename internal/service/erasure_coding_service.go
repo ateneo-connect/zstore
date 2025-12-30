@@ -29,6 +29,8 @@ import (
 	"bytes"
 	"fmt"
 	"hash/crc64"
+	"io"
+	"os"
 
 	"github.com/klauspost/reedsolomon"
 	"github.com/zzenonn/zstore/internal/domain"
@@ -87,6 +89,42 @@ func ReconstructFile(shards [][]byte, meta domain.ObjectMetadata) ([]byte, error
 	// Make shards slice with total shards capacity
 	reconstructShards := make([][]byte, totalShards)
 	copy(reconstructShards, shards)
+
+	if err := enc.Reconstruct(reconstructShards); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if err := enc.Join(&buf, reconstructShards, int(meta.OriginalSize)); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// ReconstructFileFromFiles reconstructs a file from shard files without loading all into memory
+func ReconstructFileFromFiles(shardFiles []*os.File, meta domain.ObjectMetadata) ([]byte, error) {
+	totalShards := len(meta.ShardHashes)
+	dataShards := totalShards - meta.ParityShards
+	parityShards := meta.ParityShards
+
+	enc, err := reedsolomon.New(dataShards, parityShards)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read shard data from files
+	reconstructShards := make([][]byte, totalShards)
+	for i, file := range shardFiles {
+		if file != nil {
+			file.Seek(0, 0)
+			shardData, err := io.ReadAll(file)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read shard file %d: %w", i, err)
+			}
+			reconstructShards[i] = shardData
+		}
+	}
 
 	if err := enc.Reconstruct(reconstructShards); err != nil {
 		return nil, err

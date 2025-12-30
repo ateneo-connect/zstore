@@ -124,7 +124,6 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	// Get prefix and filename for metadata lookup
 	prefix := filepath.Dir(key)
-
 	fileName := filepath.Base(key)
 
 	// Get metadata
@@ -135,15 +134,24 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 
 	log.Debugf("Object Metadata: %+v\n", metadata)
 
-	// Download shards using dynamic concurrency strategy
-	shards, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
+	// Download shards to temporary files
+	shardFiles, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
 	if err != nil {
 		return nil, err
 	}
 
-	// Phase 5: Reconstruct original file from available shards
-	// Reed-Solomon can reconstruct with any minShardsNeeded valid shards
-	reconstructedData, err := ReconstructFile(shards, metadata)
+	// Cleanup temp files when done
+	defer func() {
+		for _, f := range shardFiles {
+			if f != nil {
+				f.Close()
+				os.Remove(f.Name())
+			}
+		}
+	}()
+
+	// Reconstruct file from temp files
+	reconstructedData, err := ReconstructFileFromFiles(shardFiles, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -270,28 +278,17 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 }
 
 // downloadShards downloads shards sequentially to temporary files with robust error handling
-func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([][]byte, error) {
+func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([]*os.File, error) {
 	// Sequential download strategy with temporary files:
 	// 1. Download shards to temp files one by one until we have minShardsNeeded
 	// 2. Skip failed shards and continue to next
-	// 3. Read temp files into memory for reconstruction
-	// 4. Clean up temp files
+	// 3. Return temp file handles for reconstruction
+	// 4. Caller is responsible for cleanup
 
-	shards := make([][]byte, len(shardHashes))
+	shardFiles := make([]*os.File, len(shardHashes))
 	minShardsNeeded := len(shardHashes) - parityShards
 	successfulShards := 0
 	failedShards := 0
-	var tempFiles []*os.File
-
-	// Cleanup temp files on exit
-	defer func() {
-		for _, f := range tempFiles {
-			if f != nil {
-				f.Close()
-				os.Remove(f.Name())
-			}
-		}
-	}()
 
 	// Try downloading shards sequentially to temp files
 	for i, shardInfo := range shardHashes {
@@ -328,35 +325,40 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			failedShards++
 			continue
 		}
-		tempFiles = append(tempFiles, tempFile)
 
 		// Stream shard data directly to temp file
 		_, err = io.Copy(tempFile, reader)
 		reader.Close()
 		if err != nil {
 			log.Warnf("Failed to write shard %d to temp file: %v", i, err)
+			tempFile.Close()
+			os.Remove(tempFile.Name())
 			failedShards++
 			continue
 		}
 
-		// Read temp file back for integrity check
+		// Verify shard integrity by reading temp file
 		tempFile.Seek(0, 0)
 		shardData, err := io.ReadAll(tempFile)
 		if err != nil {
 			log.Warnf("Failed to read temp file for shard %d: %v", i, err)
+			tempFile.Close()
+			os.Remove(tempFile.Name())
 			failedShards++
 			continue
 		}
 
-		// Verify shard integrity
 		if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
 			log.Warnf("Shard %d failed integrity check: %v", i, err)
+			tempFile.Close()
+			os.Remove(tempFile.Name())
 			failedShards++
 			continue
 		}
 
-		// Success - keep shard data in memory for reconstruction
-		shards[i] = shardData
+		// Success - reset file position for reconstruction
+		tempFile.Seek(0, 0)
+		shardFiles[i] = tempFile
 		successfulShards++
 		log.Debugf("Successfully downloaded shard %d to temp file (%d/%d needed)", i, successfulShards, minShardsNeeded)
 	}
@@ -364,10 +366,17 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 	log.Debugf("%d shards downloaded successfully, %d failed", successfulShards, failedShards)
 
 	if successfulShards < minShardsNeeded {
+		// Cleanup on failure
+		for _, f := range shardFiles {
+			if f != nil {
+				f.Close()
+				os.Remove(f.Name())
+			}
+		}
 		return nil, errors.ErrInsufficientShards
 	}
 
-	return shards, nil
+	return shardFiles, nil
 }
 
 // verifyFileIntegrity checks if the reconstructed file matches the expected CRC64 hash
