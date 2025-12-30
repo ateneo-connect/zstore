@@ -120,8 +120,11 @@ func initConfig() {
 	placer := initRepositories(cfg.AwsConfig, cfg.GcsClient, cfg.Buckets)
 	metadataRepository := db.NewMetadataRepository(dynamoDb.Client, cfg.DynamoDBTable)
 
+	// Create repository factory for raw file service
+	factory := objectstore.NewObjectRepositoryFactory(cfg.AwsConfig, cfg.GcsClient)
+
 	fileService = service.NewFileService(placer, &metadataRepository)
-	rawFileService = service.NewRawFileService(cfg.AwsConfig)
+	rawFileService = service.NewRawFileService(factory)
 }
 
 // initRepositories initializes the placement system and repositories
