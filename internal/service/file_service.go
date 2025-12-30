@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"hash/crc64"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -268,19 +269,31 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 	return nil
 }
 
-// downloadShards downloads shards sequentially with robust error handling
+// downloadShards downloads shards sequentially to temporary files with robust error handling
 func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([][]byte, error) {
-	// Sequential download strategy:
-	// 1. Download shards one by one until we have minShardsNeeded
+	// Sequential download strategy with temporary files:
+	// 1. Download shards to temp files one by one until we have minShardsNeeded
 	// 2. Skip failed shards and continue to next
-	// 3. Only fail if we can't get enough shards
+	// 3. Read temp files into memory for reconstruction
+	// 4. Clean up temp files
 
 	shards := make([][]byte, len(shardHashes))
 	minShardsNeeded := len(shardHashes) - parityShards
 	successfulShards := 0
 	failedShards := 0
+	var tempFiles []*os.File
 
-	// Try downloading shards sequentially
+	// Cleanup temp files on exit
+	defer func() {
+		for _, f := range tempFiles {
+			if f != nil {
+				f.Close()
+				os.Remove(f.Name())
+			}
+		}
+	}()
+
+	// Try downloading shards sequentially to temp files
 	for i, shardInfo := range shardHashes {
 		// Stop early if we have enough shards
 		if successfulShards >= minShardsNeeded {
@@ -307,10 +320,30 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			continue
 		}
 
-		shardData, err := io.ReadAll(reader)
+		// Create temp file for this shard
+		tempFile, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
+		if err != nil {
+			log.Warnf("Failed to create temp file for shard %d: %v", i, err)
+			reader.Close()
+			failedShards++
+			continue
+		}
+		tempFiles = append(tempFiles, tempFile)
+
+		// Stream shard data directly to temp file
+		_, err = io.Copy(tempFile, reader)
 		reader.Close()
 		if err != nil {
-			log.Warnf("Failed to read shard %d: %v", i, err)
+			log.Warnf("Failed to write shard %d to temp file: %v", i, err)
+			failedShards++
+			continue
+		}
+
+		// Read temp file back for integrity check
+		tempFile.Seek(0, 0)
+		shardData, err := io.ReadAll(tempFile)
+		if err != nil {
+			log.Warnf("Failed to read temp file for shard %d: %v", i, err)
 			failedShards++
 			continue
 		}
@@ -322,10 +355,10 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			continue
 		}
 
-		// Success
+		// Success - keep shard data in memory for reconstruction
 		shards[i] = shardData
 		successfulShards++
-		log.Debugf("Successfully downloaded shard %d (%d/%d needed)", i, successfulShards, minShardsNeeded)
+		log.Debugf("Successfully downloaded shard %d to temp file (%d/%d needed)", i, successfulShards, minShardsNeeded)
 	}
 
 	log.Debugf("%d shards downloaded successfully, %d failed", successfulShards, failedShards)
