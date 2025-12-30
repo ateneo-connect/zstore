@@ -94,8 +94,16 @@ func (r *GCSObjectRepository) Download(ctx context.Context, key string, dest io.
 	}
 	defer reader.Close()
 
-	// Read all data
-	data, err := io.ReadAll(reader)
+	// Setup progress bar if not quiet
+	var proxyReader io.Reader = reader
+	if !quiet {
+		bar := progressbar.DefaultBytes(attrs.Size, "downloading")
+		pbReader := progressbar.NewReader(reader, bar)
+		proxyReader = &pbReader
+	}
+
+	// Read all data with progress tracking
+	data, err := io.ReadAll(proxyReader)
 	if err != nil {
 		return fmt.Errorf("failed to read from GCS: %w", err)
 	}
