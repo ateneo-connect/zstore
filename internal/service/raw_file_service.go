@@ -7,8 +7,8 @@
 // - No metadata or sharding overhead
 //
 // Key Operations:
-// - UploadFileRaw: Direct upload to storage without sharding
-// - DownloadFileRaw: Direct download from storage without reconstruction
+// - UploadToS3/UploadToGCS: Direct upload to storage without sharding
+// - DownloadFromS3/DownloadFromGCS: Direct download from storage without reconstruction
 //
 // Use Cases:
 // - Simple file storage without fault tolerance requirements
@@ -21,109 +21,67 @@ import (
 	"context"
 	"io"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
+	"github.com/zzenonn/zstore/internal/repository/objectstore"
 )
 
-// RawFileService provides direct file operations without erasure coding
-// TODO: Add support for other storage providers (GCS, Azure) beyond S3
+// RawFileService provides direct file operations without erasure coding using existing repositories
 type RawFileService struct {
-	awsConfig aws.Config
+	factory *objectstore.ObjectRepositoryFactory
 }
 
-// NewRawFileService creates a new RawFileService for simple raw operations
-func NewRawFileService(awsConfig aws.Config) *RawFileService {
+// NewRawFileService creates a new RawFileService that uses the repository factory
+func NewRawFileService(factory *objectstore.ObjectRepositoryFactory) *RawFileService {
 	return &RawFileService{
-		awsConfig: awsConfig,
+		factory: factory,
 	}
 }
 
-// UploadFileRaw uploads a file directly to S3 without erasure coding
-func (r *RawFileService) UploadFileRaw(ctx context.Context, bucketName, key string, reader io.Reader, quiet bool) error {
+// UploadToRepository uploads a file directly to a repository without erasure coding
+func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key string, reader io.Reader, quiet bool, providerType objectstore.RepositoryType) error {
 	log.Debugf("Uploading raw file %s to bucket %s", key, bucketName)
-	
-	// Create S3 client and uploader
-	s3Client := s3.NewFromConfig(r.awsConfig)
-	uploader := manager.NewUploader(s3Client)
-	
-	// Create progress bar if not quiet
-	var progressReader io.Reader = reader
-	if !quiet {
-		// Try to get file size for progress bar
-		if seeker, ok := reader.(io.Seeker); ok {
-			size, err := seeker.Seek(0, io.SeekEnd)
-			if err == nil {
-				seeker.Seek(0, io.SeekStart)
-				bar := progressbar.DefaultBytes(size, "uploading")
-				pbReader := progressbar.NewReader(reader, bar)
-				progressReader = &pbReader
-			}
-		}
+
+	// Create repository for this bucket with specified provider type
+	repo, err := r.createRepositoryForBucket(bucketName, providerType)
+	if err != nil {
+		return err
 	}
-	
-	_, err := uploader.Upload(ctx, &s3.PutObjectInput{
-		Bucket: &bucketName,
-		Key:    &key,
-		Body:   progressReader,
-	})
+
+	_, err = repo.Upload(ctx, key, reader, quiet)
 	return err
 }
 
-// DownloadFileRaw downloads a file directly from S3 without erasure coding reconstruction
-func (r *RawFileService) DownloadFileRaw(ctx context.Context, bucketName, key string, quiet bool) (io.ReadCloser, error) {
+// DownloadFromRepository downloads a file directly from a repository without erasure coding
+func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, quiet bool, providerType objectstore.RepositoryType) (io.ReadCloser, error) {
 	log.Debugf("Downloading raw file %s from bucket %s", key, bucketName)
-	
-	// Create S3 client
-	s3Client := s3.NewFromConfig(r.awsConfig)
-	
-	// Get object info first to determine size for progress bar
-	if !quiet {
-		headResult, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{
-			Bucket: &bucketName,
-			Key:    &key,
-		})
-		if err == nil && headResult.ContentLength != nil {
-			// Get the object with progress tracking
-			result, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
-				Bucket: &bucketName,
-				Key:    &key,
-			})
-			if err != nil {
-				return nil, err
-			}
-			
-			// Wrap with progress bar
-			bar := progressbar.DefaultBytes(*headResult.ContentLength, "downloading")
-			progressReader := progressbar.NewReader(result.Body, bar)
-			return io.NopCloser(&progressReader), nil
-		}
-	}
-	
-	// Fallback to simple download without progress
-	result, err := s3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: &bucketName,
-		Key:    &key,
-	})
+
+	// Create repository for this bucket with specified provider type
+	repo, err := r.createRepositoryForBucket(bucketName, providerType)
 	if err != nil {
 		return nil, err
 	}
-	
-	return result.Body, nil
+
+	return repo.Download(ctx, key, quiet)
 }
 
-// DeleteFileRaw deletes a file directly from S3 without erasure coding
-func (r *RawFileService) DeleteFileRaw(ctx context.Context, bucketName, key string) error {
+// DeleteFromRepository deletes a file directly from a repository without erasure coding
+func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, key string, providerType objectstore.RepositoryType) error {
 	log.Debugf("Deleting raw file %s from bucket %s", key, bucketName)
-	
-	// Create S3 client
-	s3Client := s3.NewFromConfig(r.awsConfig)
-	
-	_, err := s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
-		Bucket: &bucketName,
-		Key:    &key,
-	})
-	return err
+
+	// Create repository for this bucket with specified provider type
+	repo, err := r.createRepositoryForBucket(bucketName, providerType)
+	if err != nil {
+		return err
+	}
+
+	return repo.Delete(ctx, key)
+}
+
+// createRepositoryForBucket creates a repository based on bucket name and provider type
+func (r *RawFileService) createRepositoryForBucket(bucketName string, providerType objectstore.RepositoryType) (objectstore.ObjectRepository, error) {
+	config := objectstore.BucketConfig{
+		Name: bucketName,
+		Type: providerType,
+	}
+	return r.factory.CreateRepository(config)
 }
