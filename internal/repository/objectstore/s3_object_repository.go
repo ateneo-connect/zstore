@@ -77,36 +77,41 @@ func (pw *progressWriterAt) WriteAt(p []byte, off int64) (n int, err error) {
 }
 
 // Download downloads an object file from S3
+// TODO: Handle large files that exceed available memory. Current implementation
+// pre-allocates entire file size in memory which will fail for very large objects.
+// Consider: size limit check, temp file fallback, or hybrid approach (small files in memory, large files to temp file)
 func (r *S3ObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
 	downloader := manager.NewDownloader(r.client)
 	
-	// Get object info for progress bar
-	var bar *progressbar.ProgressBar
-	if !quiet {
-		headResult, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{
-			Bucket: aws.String(r.bucketName),
-			Key:    aws.String(key),
-		})
-		if err == nil && headResult.ContentLength != nil {
-			bar = progressbar.DefaultBytes(*headResult.ContentLength, "downloading")
-		}
-	}
-	
-	// Create a buffer to download into
-	buf := manager.NewWriteAtBuffer([]byte{})
-	writer := &progressWriterAt{w: buf, bar: bar}
-	
-	input := &s3.GetObjectInput{
+	// Get object size first
+	headResult, err := r.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(r.bucketName),
 		Key:    aws.String(key),
-	}
-	
-	_, err := downloader.Download(ctx, writer, input)
+	})
 	if err != nil {
 		return nil, err
 	}
 	
-	return io.NopCloser(bytes.NewReader(buf.Bytes())), nil
+	// Pre-allocate buffer with exact size
+	buf := make([]byte, int(*headResult.ContentLength))
+	w := manager.NewWriteAtBuffer(buf)
+	
+	// Add progress bar if not quiet
+	var writer io.WriterAt = w
+	if !quiet {
+		bar := progressbar.DefaultBytes(*headResult.ContentLength, "downloading")
+		writer = &progressWriterAt{w: w, bar: bar}
+	}
+	
+	_, err = downloader.Download(ctx, writer, &s3.GetObjectInput{
+		Bucket: aws.String(r.bucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, err
+	}
+	
+	return io.NopCloser(bytes.NewReader(w.Bytes())), nil
 }
 
 // Delete removes an object file from S3
