@@ -302,7 +302,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 		}
 
 		shardStart := time.Now()
-		log.Infof("[PERF] Starting shard %d download: bucket=%s, key=%s", i, shardInfo.BucketName, shardInfo.Key)
+		log.Debugf("[PERF] Starting shard %d download: bucket=%s, key=%s", i, shardInfo.BucketName, shardInfo.Key)
 
 		// Try to download this shard
 		repoStart := time.Now()
@@ -312,7 +312,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			failedShards++
 			continue
 		}
-		log.Infof("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
+		log.Debugf("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
 
 		downloadStart := time.Now()
 		// Create temp file for this shard
@@ -333,7 +333,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			failedShards++
 			continue
 		}
-		log.Infof("[PERF] Shard %d: Download took %v", i, time.Since(downloadStart))
+		log.Debugf("[PERF] Shard %d: Download took %v", i, time.Since(downloadStart))
 
 		// TODO: Skip integrity verification for performance testing
 		// Verify shard integrity by reading temp file
@@ -356,7 +356,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 		tempFilePaths = append(tempFilePaths, tempFilePath)
 		successfulShards++
 		shardTotal := time.Since(shardStart)
-		log.Infof("[PERF] Shard %d: TOTAL time %v (%d/%d needed)", i, shardTotal, successfulShards, minShardsNeeded)
+		log.Debugf("[PERF] Shard %d: TOTAL time %v (%d/%d needed)", i, shardTotal, successfulShards, minShardsNeeded)
 	}
 
 	log.Debugf("%d shards downloaded successfully, %d failed", successfulShards, failedShards)
