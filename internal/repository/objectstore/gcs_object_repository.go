@@ -96,8 +96,15 @@ func (r *GCSObjectRepository) Download(ctx context.Context, key string, quiet bo
 		log.Debugf("Downloading from GCS: gs://%s/%s", r.bucketName, key)
 	}
 
-	// Create download buffer
-	buf := transfermanager.NewDownloadBuffer(nil)
+	// Create download buffer - use DownloadBuffer with proper sizing
+	var buf *transfermanager.DownloadBuffer
+	if attrs != nil {
+		// Pre-size buffer to avoid slice bounds issues
+		buf = transfermanager.NewDownloadBuffer(make([]byte, attrs.Size))
+	} else {
+		// Let it grow dynamically
+		buf = transfermanager.NewDownloadBuffer(nil)
+	}
 
 	// Download using transfer manager
 	input := &transfermanager.DownloadObjectInput{
