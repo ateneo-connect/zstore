@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zzenonn/zstore/internal/repository/objectstore"
 )
 
 var quiet bool
@@ -140,14 +141,14 @@ var uploadRawCmd = &cobra.Command{
 		
 		// Route to appropriate repository
 		if strings.HasPrefix(url, "s3://") {
-			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet)
+			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet, objectstore.S3Type)
 			if err != nil {
 				fmt.Printf("Error uploading to S3: %v\n", err)
 				return
 			}
 			fmt.Printf("File uploaded successfully: %s -> s3://%s/%s\n", filePath, bucket, key)
 		} else {
-			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet)
+			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet, objectstore.GCSType)
 			if err != nil {
 				fmt.Printf("Error uploading to GCS: %v\n", err)
 				return
@@ -240,7 +241,11 @@ var downloadRawCmd = &cobra.Command{
 		
 		// Route to appropriate repository
 		var reader io.ReadCloser
-		reader, err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, quiet)
+		if strings.HasPrefix(url, "s3://") {
+			reader, err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, quiet, objectstore.S3Type)
+		} else {
+			reader, err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, quiet, objectstore.GCSType)
+		}
 		
 		if err != nil {
 			fmt.Printf("Error downloading file: %v\n", err)
@@ -326,7 +331,11 @@ var deleteRawCmd = &cobra.Command{
 		}
 
 		// Route to appropriate repository
-		err = rawFileService.DeleteFromRepository(context.Background(), bucket, key)
+		if strings.HasPrefix(url, "s3://") {
+			err = rawFileService.DeleteFromRepository(context.Background(), bucket, key, objectstore.S3Type)
+		} else {
+			err = rawFileService.DeleteFromRepository(context.Background(), bucket, key, objectstore.GCSType)
+		}
 		
 		if err != nil {
 			fmt.Printf("Error deleting file: %v\n", err)
