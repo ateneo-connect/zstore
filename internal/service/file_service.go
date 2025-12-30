@@ -299,22 +299,30 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			break
 		}
 
+		shardStart := time.Now()
+		log.Infof("[PERF] Starting shard %d download at %v", i, shardStart)
+
 		// Try to download this shard
+		repoStart := time.Now()
 		repo, err := s.placer.GetRepositoryForBucket(shardInfo.BucketName)
 		if err != nil {
 			log.Warnf("Failed to get repository for shard %d: %v", i, err)
 			failedShards++
 			continue
 		}
+		log.Infof("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
 
+		downloadStart := time.Now()
 		reader, err := repo.Download(ctx, shardInfo.Key, quiet)
 		if err != nil {
 			log.Warnf("Failed to download shard %d: %v", i, err)
 			failedShards++
 			continue
 		}
+		log.Infof("[PERF] Shard %d: Download initiation took %v", i, time.Since(downloadStart))
 
 		// Create temp file for this shard
+		fileStart := time.Now()
 		tempFile, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
 		if err != nil {
 			log.Warnf("Failed to create temp file for shard %d: %v", i, err)
@@ -323,17 +331,21 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			continue
 		}
 		tempFilePath := tempFile.Name()
+		log.Infof("[PERF] Shard %d: Temp file creation took %v", i, time.Since(fileStart))
 
 		// Stream shard data directly to temp file
-		_, err = io.Copy(tempFile, reader)
+		copyStart := time.Now()
+		bytesWritten, err := io.Copy(tempFile, reader)
 		reader.Close()
 		tempFile.Close()
+		copyDuration := time.Since(copyStart)
 		if err != nil {
 			log.Warnf("Failed to write shard %d to temp file: %v", i, err)
 			os.Remove(tempFilePath)
 			failedShards++
 			continue
 		}
+		log.Infof("[PERF] Shard %d: Copied %d bytes in %v (%.2f MB/s)", i, bytesWritten, copyDuration, float64(bytesWritten)/copyDuration.Seconds()/1024/1024)
 
 		// TODO: Skip integrity verification for performance testing
 		// Verify shard integrity by reading temp file
@@ -355,7 +367,8 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 		// Success - keep temp file path
 		tempFilePaths = append(tempFilePaths, tempFilePath)
 		successfulShards++
-		log.Debugf("Successfully downloaded shard %d to temp file (%d/%d needed)", i, successfulShards, minShardsNeeded)
+		shardTotal := time.Since(shardStart)
+		log.Infof("[PERF] Shard %d: TOTAL time %v (%d/%d needed)", i, shardTotal, successfulShards, minShardsNeeded)
 	}
 
 	log.Debugf("%d shards downloaded successfully, %d failed", successfulShards, failedShards)
