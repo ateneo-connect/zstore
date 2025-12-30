@@ -38,11 +38,11 @@ func NewRawFileService(factory *objectstore.ObjectRepositoryFactory) *RawFileSer
 }
 
 // UploadToRepository uploads a file directly to a repository without erasure coding
-func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key string, reader io.Reader, quiet bool) error {
+func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key string, reader io.Reader, quiet bool, providerType objectstore.RepositoryType) error {
 	log.Debugf("Uploading raw file %s to bucket %s", key, bucketName)
 
-	// Create repository for this bucket on-demand
-	repo, err := r.createRepositoryForBucket(bucketName)
+	// Create repository for this bucket with specified provider type
+	repo, err := r.createRepositoryForBucket(bucketName, providerType)
 	if err != nil {
 		return err
 	}
@@ -52,11 +52,11 @@ func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key
 }
 
 // DownloadFromRepository downloads a file directly from a repository without erasure coding
-func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, quiet bool) (io.ReadCloser, error) {
+func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, quiet bool, providerType objectstore.RepositoryType) (io.ReadCloser, error) {
 	log.Debugf("Downloading raw file %s from bucket %s", key, bucketName)
 
-	// Create repository for this bucket on-demand
-	repo, err := r.createRepositoryForBucket(bucketName)
+	// Create repository for this bucket with specified provider type
+	repo, err := r.createRepositoryForBucket(bucketName, providerType)
 	if err != nil {
 		return nil, err
 	}
@@ -65,11 +65,11 @@ func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName,
 }
 
 // DeleteFromRepository deletes a file directly from a repository without erasure coding
-func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, key string) error {
+func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, key string, providerType objectstore.RepositoryType) error {
 	log.Debugf("Deleting raw file %s from bucket %s", key, bucketName)
 
-	// Create repository for this bucket on-demand
-	repo, err := r.createRepositoryForBucket(bucketName)
+	// Create repository for this bucket with specified provider type
+	repo, err := r.createRepositoryForBucket(bucketName, providerType)
 	if err != nil {
 		return err
 	}
@@ -77,26 +77,11 @@ func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, k
 	return repo.Delete(ctx, key)
 }
 
-// createRepositoryForBucket creates a repository based on bucket name and URL scheme
-func (r *RawFileService) createRepositoryForBucket(bucketName string) (objectstore.ObjectRepository, error) {
-	// For now, we need to determine the provider type
-	// This could be enhanced to auto-detect or use a registry
-	// For simplicity, we'll try S3 first, then GCS
-
-	// Try S3 first
-	s3Config := objectstore.BucketConfig{
+// createRepositoryForBucket creates a repository based on bucket name and provider type
+func (r *RawFileService) createRepositoryForBucket(bucketName string, providerType objectstore.RepositoryType) (objectstore.ObjectRepository, error) {
+	config := objectstore.BucketConfig{
 		Name: bucketName,
-		Type: objectstore.S3Type,
+		Type: providerType,
 	}
-	repo, err := r.factory.CreateRepository(s3Config)
-	if err == nil {
-		return repo, nil
-	}
-
-	// Try GCS if S3 fails
-	gcsConfig := objectstore.BucketConfig{
-		Name: bucketName,
-		Type: objectstore.GCSType,
-	}
-	return r.factory.CreateRepository(gcsConfig)
+	return r.factory.CreateRepository(config)
 }
