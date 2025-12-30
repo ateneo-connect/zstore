@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"cloud.google.com/go/storage"
-	"cloud.google.com/go/storage/transfermanager"
 	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
 )
@@ -15,7 +14,6 @@ import (
 type GCSObjectRepository struct {
 	client     *storage.Client
 	bucketName string
-	downloader *transfermanager.Downloader
 }
 
 // Upload uploads an object to GCS
