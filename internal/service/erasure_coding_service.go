@@ -29,6 +29,8 @@ import (
 	"bytes"
 	"fmt"
 	"hash/crc64"
+	"io"
+	"os"
 
 	"github.com/klauspost/reedsolomon"
 	"github.com/zzenonn/zstore/internal/domain"
@@ -87,6 +89,54 @@ func ReconstructFile(shards [][]byte, meta domain.ObjectMetadata) ([]byte, error
 	// Make shards slice with total shards capacity
 	reconstructShards := make([][]byte, totalShards)
 	copy(reconstructShards, shards)
+
+	if err := enc.Reconstruct(reconstructShards); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if err := enc.Join(&buf, reconstructShards, int(meta.OriginalSize)); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// ReconstructFileFromFiles reconstructs a file from shard files and cleans up temp files
+func ReconstructFileFromFiles(shardFiles []*os.File, meta domain.ObjectMetadata) ([]byte, error) {
+	totalShards := len(meta.ShardHashes)
+	dataShards := totalShards - meta.ParityShards
+	parityShards := meta.ParityShards
+
+	enc, err := reedsolomon.New(dataShards, parityShards)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read shards from files into memory for reconstruction
+	reconstructShards := make([][]byte, totalShards)
+	for i, file := range shardFiles {
+		if file != nil {
+			// Read shard data from file
+			file.Seek(0, 0) // Reset to beginning
+			shardData, err := io.ReadAll(file)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read shard %d: %w", i, err)
+			}
+			reconstructShards[i] = shardData
+		}
+		// nil entries remain nil for missing shards
+	}
+
+	// Clean up temp files
+	defer func() {
+		for _, file := range shardFiles {
+			if file != nil {
+				file.Close()
+				os.Remove(file.Name())
+			}
+		}
+	}()
 
 	if err := enc.Reconstruct(reconstructShards); err != nil {
 		return nil, err
