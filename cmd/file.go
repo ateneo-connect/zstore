@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,14 +174,6 @@ var downloadCmd = &cobra.Command{
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		concurrency, _ := cmd.Flags().GetInt("concurrency")
 
-		fileService.SetConcurrency(concurrency)
-		reader, err := fileService.DownloadFile(context.Background(), key, quiet)
-		if err != nil {
-			fmt.Printf("Error downloading file: %v\n", err)
-			return
-		}
-		defer reader.Close()
-
 		// If output path is a directory, use the filename from the key
 		if stat, err := os.Stat(outputPath); err == nil && stat.IsDir() {
 			fileName := filepath.Base(key)
@@ -202,9 +193,10 @@ var downloadCmd = &cobra.Command{
 		}
 		defer outFile.Close()
 
-		_, err = io.Copy(outFile, reader)
+		fileService.SetConcurrency(concurrency)
+		err = fileService.DownloadFile(context.Background(), key, outFile, quiet)
 		if err != nil {
-			fmt.Printf("Error writing file: %v\n", err)
+			fmt.Printf("Error downloading file: %v\n", err)
 			return
 		}
 
@@ -239,20 +231,6 @@ var downloadRawCmd = &cobra.Command{
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		
-		// Route to appropriate repository
-		var reader io.ReadCloser
-		if strings.HasPrefix(url, "s3://") {
-			reader, err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, quiet, objectstore.S3Type)
-		} else {
-			reader, err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, quiet, objectstore.GCSType)
-		}
-		
-		if err != nil {
-			fmt.Printf("Error downloading file: %v\n", err)
-			return
-		}
-		defer reader.Close()
-
 		// If output path is a directory, use the filename from the key
 		if stat, err := os.Stat(outputPath); err == nil && stat.IsDir() {
 			fileName := filepath.Base(key)
@@ -271,10 +249,16 @@ var downloadRawCmd = &cobra.Command{
 			return
 		}
 		defer outFile.Close()
-
-		_, err = io.Copy(outFile, reader)
+		
+		// Route to appropriate repository
+		if strings.HasPrefix(url, "s3://") {
+			err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, outFile, quiet, objectstore.S3Type)
+		} else {
+			err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, outFile, quiet, objectstore.GCSType)
+		}
+		
 		if err != nil {
-			fmt.Printf("Error writing file: %v\n", err)
+			fmt.Printf("Error downloading file: %v\n", err)
 			return
 		}
 

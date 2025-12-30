@@ -18,6 +18,9 @@
 /build/
 /dist/
 
+# Main binary
+zstore
+
 # IDE and editor specific files
 # VS Code settings and workspace
 .vscode/

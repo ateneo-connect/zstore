@@ -52,16 +52,16 @@ func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key
 }
 
 // DownloadFromRepository downloads a file directly from a repository without erasure coding
-func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, quiet bool, providerType objectstore.RepositoryType) (io.ReadCloser, error) {
+func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, dest io.WriterAt, quiet bool, providerType objectstore.RepositoryType) error {
 	log.Debugf("Downloading raw file %s from bucket %s", key, bucketName)
 
 	// Create repository for this bucket with specified provider type
 	repo, err := r.createRepositoryForBucket(bucketName, providerType)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return repo.Download(ctx, key, quiet)
+	return repo.Download(ctx, key, dest, quiet)
 }
 
 // DeleteFromRepository deletes a file directly from a repository without erasure coding

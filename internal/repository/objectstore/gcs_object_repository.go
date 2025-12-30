@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"cloud.google.com/go/storage"
+	"cloud.google.com/go/storage/transfermanager"
 	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
 )
@@ -14,6 +15,7 @@ import (
 type GCSObjectRepository struct {
 	client     *storage.Client
 	bucketName string
+	downloader *transfermanager.Downloader
 }
 
 // Upload uploads an object to GCS
@@ -71,31 +73,49 @@ func (pr *progressReader) Close() error {
 }
 
 // Download downloads an object from GCS
-func (r *GCSObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
-	bucket := r.client.Bucket(r.bucketName)
-	obj := bucket.Object(key)
-
+func (r *GCSObjectRepository) Download(ctx context.Context, key string, dest io.WriterAt, quiet bool) error {
 	if !quiet {
 		log.Debugf("Downloading from GCS: gs://%s/%s", r.bucketName, key)
 	}
 
+	// Get object attributes first to check size
+	bucket := r.client.Bucket(r.bucketName)
+	obj := bucket.Object(key)
+	attrs, err := obj.Attrs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get GCS object attributes: %w", err)
+	}
+	log.Debugf("GCS object %s size: %d bytes", key, attrs.Size)
+
+	// Create reader for the object
 	reader, err := obj.NewReader(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download from GCS: %w", err)
+		return fmt.Errorf("failed to create GCS reader: %w", err)
+	}
+	defer reader.Close()
+
+	// Setup progress bar if not quiet
+	var proxyReader io.Reader = reader
+	if !quiet {
+		bar := progressbar.DefaultBytes(attrs.Size, "downloading")
+		pbReader := progressbar.NewReader(reader, bar)
+		proxyReader = &pbReader
 	}
 
-	if quiet {
-		return reader, nil
+	// Read all data with progress tracking
+	data, err := io.ReadAll(proxyReader)
+	if err != nil {
+		return fmt.Errorf("failed to read from GCS: %w", err)
 	}
 
-	// Get object attributes for progress bar
-	attrs, err := obj.Attrs(ctx)
-	var bar *progressbar.ProgressBar
-	if err == nil {
-		bar = progressbar.DefaultBytes(attrs.Size, "downloading")
+	// Write to destination at offset 0
+	_, err = dest.WriteAt(data, 0)
+	if err != nil {
+		return fmt.Errorf("failed to write to destination: %w", err)
 	}
 
-	return &progressReader{r: reader, bar: bar}, nil
+	log.Debugf("Completed GCS download for %s, wrote %d bytes", key, len(data))
+	return nil
 }
 
 // Delete deletes an object from GCS

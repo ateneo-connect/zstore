@@ -43,5 +43,6 @@ func NewGCSObjectRepository(client *storage.Client, bucketName string) GCSObject
 	return GCSObjectRepository{
 		client:     client,
 		bucketName: bucketName,
+		downloader: nil, // Will be initialized on first use
 	}
 }

@@ -15,7 +15,7 @@ import (
 // ObjectRepository defines the interface for object storage operations
 type ObjectRepository interface {
 	Upload(ctx context.Context, key string, r io.Reader, quiet bool) (string, error)
-	Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error)
+	Download(ctx context.Context, key string, dest io.WriterAt, quiet bool) error
 	Delete(ctx context.Context, key string) error
 	DeletePrefix(ctx context.Context, prefix string) error
 	GetBucketName() string
