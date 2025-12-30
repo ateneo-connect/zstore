@@ -137,3 +137,38 @@ func ReconstructFileFromFiles(shardFiles []*os.File, meta domain.ObjectMetadata)
 
 	return buf.Bytes(), nil
 }
+
+// ReconstructFileFromPaths reconstructs a file from shard file paths
+func ReconstructFileFromPaths(filePaths []string, meta domain.ObjectMetadata) ([]byte, error) {
+	totalShards := len(meta.ShardHashes)
+	dataShards := totalShards - meta.ParityShards
+	parityShards := meta.ParityShards
+
+	enc, err := reedsolomon.New(dataShards, parityShards)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create sparse array for reconstruction - only first N files are valid
+	reconstructShards := make([][]byte, totalShards)
+	for i, path := range filePaths {
+		if i < totalShards {
+			shardData, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read shard file %s: %w", path, err)
+			}
+			reconstructShards[i] = shardData
+		}
+	}
+
+	if err := enc.Reconstruct(reconstructShards); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	if err := enc.Join(&buf, reconstructShards, int(meta.OriginalSize)); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}

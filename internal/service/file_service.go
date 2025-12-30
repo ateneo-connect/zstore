@@ -135,23 +135,20 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 	log.Debugf("Object Metadata: %+v\n", metadata)
 
 	// Download shards to temporary files
-	shardFiles, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
+	tempFilePaths, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
 	if err != nil {
 		return nil, err
 	}
 
 	// Cleanup temp files when done
 	defer func() {
-		for _, f := range shardFiles {
-			if f != nil {
-				f.Close()
-				os.Remove(f.Name())
-			}
+		for _, path := range tempFilePaths {
+			os.Remove(path)
 		}
 	}()
 
 	// Reconstruct file from temp files
-	reconstructedData, err := ReconstructFileFromFiles(shardFiles, metadata)
+	reconstructedData, err := ReconstructFileFromPaths(tempFilePaths, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -278,14 +275,14 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 }
 
 // downloadShards downloads shards sequentially to temporary files with robust error handling
-func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([]*os.File, error) {
+func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([]string, error) {
 	// Sequential download strategy with temporary files:
 	// 1. Download shards to temp files one by one until we have minShardsNeeded
 	// 2. Skip failed shards and continue to next
-	// 3. Return temp file handles for reconstruction
+	// 3. Return temp file paths for reconstruction
 	// 4. Caller is responsible for cleanup
 
-	shardFiles := make([]*os.File, len(shardHashes))
+	var tempFilePaths []string
 	minShardsNeeded := len(shardHashes) - parityShards
 	successfulShards := 0
 	failedShards := 0
@@ -325,40 +322,37 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 			failedShards++
 			continue
 		}
+		tempFilePath := tempFile.Name()
 
 		// Stream shard data directly to temp file
 		_, err = io.Copy(tempFile, reader)
 		reader.Close()
+		tempFile.Close()
 		if err != nil {
 			log.Warnf("Failed to write shard %d to temp file: %v", i, err)
-			tempFile.Close()
-			os.Remove(tempFile.Name())
+			os.Remove(tempFilePath)
 			failedShards++
 			continue
 		}
 
 		// Verify shard integrity by reading temp file
-		tempFile.Seek(0, 0)
-		shardData, err := io.ReadAll(tempFile)
+		shardData, err := os.ReadFile(tempFilePath)
 		if err != nil {
 			log.Warnf("Failed to read temp file for shard %d: %v", i, err)
-			tempFile.Close()
-			os.Remove(tempFile.Name())
+			os.Remove(tempFilePath)
 			failedShards++
 			continue
 		}
 
 		if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
 			log.Warnf("Shard %d failed integrity check: %v", i, err)
-			tempFile.Close()
-			os.Remove(tempFile.Name())
+			os.Remove(tempFilePath)
 			failedShards++
 			continue
 		}
 
-		// Success - reset file position for reconstruction
-		tempFile.Seek(0, 0)
-		shardFiles[i] = tempFile
+		// Success - keep temp file path
+		tempFilePaths = append(tempFilePaths, tempFilePath)
 		successfulShards++
 		log.Debugf("Successfully downloaded shard %d to temp file (%d/%d needed)", i, successfulShards, minShardsNeeded)
 	}
@@ -367,16 +361,13 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 
 	if successfulShards < minShardsNeeded {
 		// Cleanup on failure
-		for _, f := range shardFiles {
-			if f != nil {
-				f.Close()
-				os.Remove(f.Name())
-			}
+		for _, path := range tempFilePaths {
+			os.Remove(path)
 		}
 		return nil, errors.ErrInsufficientShards
 	}
 
-	return shardFiles, nil
+	return tempFilePaths, nil
 }
 
 // verifyFileIntegrity checks if the reconstructed file matches the expected CRC64 hash
