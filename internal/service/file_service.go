@@ -396,6 +396,13 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	log.Debugf("[PERF] Shard %d: Download initiation took %v", i, time.Since(downloadStart))
 	tempFile.Close()
 	if err != nil {
+		// Check if error is due to context cancellation (expected when we have enough shards)
+		if ctx.Err() != nil {
+			// Context was cancelled - this is expected, don't log as error
+			os.Remove(tempFilePath)
+			tempFilePaths[i] = ""
+			return
+		}
 		// Mark shard as failed and potentially start next download
 		log.Errorf("Shard %d download failed: %v", i, err)
 		os.Remove(tempFilePath)
@@ -423,17 +430,8 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	}
 	log.Debugf("[PERF] Shard %d: Copied %d bytes in %v (%.2f MB/s)", i, len(shardData), time.Since(copyStart), float64(len(shardData))/1024/1024/time.Since(copyStart).Seconds())
 
-	// Step 4: Verify shard integrity using CRC64 hash (DISABLED)
+	// Step 4: Verify shard integrity using CRC64 hash
 	// This ensures downloaded data matches what was originally stored
-	// TODO: Re-enable after fixing hash format mismatch
-	/*
-	shardData, err := os.ReadFile(tempFilePath)
-	if err != nil {
-		os.Remove(tempFilePath)
-		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
-		return
-	}
 	if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
 		log.Warnf("Shard %d failed integrity check", i)
 		os.Remove(tempFilePath)
@@ -441,7 +439,6 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
 		return
 	}
-	*/
 
 	// Step 5: Successfully downloaded shard
 	// Update shared state under mutex protection
