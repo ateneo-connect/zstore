@@ -82,17 +82,23 @@ func TestFileService_UploadDownloadDelete_Integration(t *testing.T) {
 				t.Fatalf("UploadFile failed: %v", err)
 			}
 
-			reader, err := fileService.DownloadFile(context.Background(), key, true)
+			tempFile, err := os.CreateTemp("", "test_*.tmp")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tempFile.Name())
+			
+			err = fileService.DownloadFile(context.Background(), key, tempFile, true)
 			if err != nil {
 				t.Fatalf("DownloadFile failed: %v", err)
 			}
-			defer reader.Close()
-
-			downloadedData, err := io.ReadAll(reader)
+			
+			tempFile.Seek(0, 0)
+			downloadedData, err := io.ReadAll(tempFile)
+			tempFile.Close()
 			if err != nil {
-				t.Fatalf("Failed to read downloaded data: %v", err)
+				t.Fatalf("Failed to read temp file: %v", err)
 			}
-
 			downloadedHash := sha256.Sum256(downloadedData)
 			if originalHash != downloadedHash {
 				t.Errorf("Data integrity check failed: original hash %x != downloaded hash %x", originalHash, downloadedHash)
@@ -107,7 +113,10 @@ func TestFileService_UploadDownloadDelete_Integration(t *testing.T) {
 				t.Fatalf("DeleteFile failed: %v", err)
 			}
 
-			_, err = fileService.DownloadFile(context.Background(), key, true)
+			tempFile2, _ := os.CreateTemp("", "test2_*.tmp")
+			defer os.Remove(tempFile2.Name())
+			err = fileService.DownloadFile(context.Background(), key, tempFile2, true)
+			tempFile2.Close()
 			if err == nil {
 				t.Error("Expected download to fail after deletion, but it succeeded")
 			}
@@ -144,15 +153,22 @@ func TestFileService_UploadDownload_DifferentShardConfigurations(t *testing.T) {
 				t.Fatalf("UploadFile failed: %v", err)
 			}
 
-			reader, err := fileService.DownloadFile(context.Background(), key, true)
+			tempFile, err := os.CreateTemp("", "test_*.tmp")
+			if err != nil {
+				t.Fatalf("Failed to create temp file: %v", err)
+			}
+			defer os.Remove(tempFile.Name())
+			
+			err = fileService.DownloadFile(context.Background(), key, tempFile, true)
 			if err != nil {
 				t.Fatalf("DownloadFile failed: %v", err)
 			}
-			defer reader.Close()
-
-			downloadedData, err := io.ReadAll(reader)
+			
+			tempFile.Seek(0, 0)
+			downloadedData, err := io.ReadAll(tempFile)
+			tempFile.Close()
 			if err != nil {
-				t.Fatalf("Failed to read downloaded data: %v", err)
+				t.Fatalf("Failed to read temp file: %v", err)
 			}
 
 			downloadedHash := sha256.Sum256(downloadedData)
@@ -189,15 +205,22 @@ func TestFileService_ConcurrentOperations(t *testing.T) {
 	}
 
 	for i, key := range keys {
-		reader, err := fileService.DownloadFile(context.Background(), key, true)
+		tempFile, err := os.CreateTemp("", "test_*.tmp")
+		if err != nil {
+			t.Fatalf("Failed to create temp file: %v", err)
+		}
+		defer os.Remove(tempFile.Name())
+		
+		err = fileService.DownloadFile(context.Background(), key, tempFile, true)
 		if err != nil {
 			t.Fatalf("DownloadFile %d failed: %v", i, err)
 		}
-
-		downloadedData, err := io.ReadAll(reader)
-		reader.Close()
+		
+		tempFile.Seek(0, 0)
+		downloadedData, err := io.ReadAll(tempFile)
+		tempFile.Close()
 		if err != nil {
-			t.Fatalf("Failed to read downloaded data %d: %v", i, err)
+			t.Fatalf("Failed to read temp file: %v", err)
 		}
 
 		downloadedHash := sha256.Sum256(downloadedData)
@@ -245,15 +268,22 @@ func TestFileService_AutoDetectFilename(t *testing.T) {
 	}
 	
 	// Download using the expected key
-	reader, err := fileService.DownloadFile(context.Background(), expectedKey, true)
+	tempFile, err := os.CreateTemp("", "test_*.tmp")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	
+	err = fileService.DownloadFile(context.Background(), expectedKey, tempFile, true)
 	if err != nil {
 		t.Fatalf("DownloadFile failed: %v", err)
 	}
-	defer reader.Close()
 	
-	downloadedData, err := io.ReadAll(reader)
+	tempFile.Seek(0, 0)
+	downloadedData, err := io.ReadAll(tempFile)
+	tempFile.Close()
 	if err != nil {
-		t.Fatalf("Failed to read downloaded data: %v", err)
+		t.Fatalf("Failed to read temp file: %v", err)
 	}
 	
 	downloadedHash := sha256.Sum256(downloadedData)

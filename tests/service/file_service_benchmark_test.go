@@ -119,11 +119,16 @@ func BenchmarkFileService_DownloadFile(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				reader, err := fileService.DownloadFile(context.Background(), key, true)
+				tempFile, err := os.CreateTemp("", "benchmark_*.tmp")
+				if err != nil {
+					b.Fatalf("Failed to create temp file: %v", err)
+				}
+				err = fileService.DownloadFile(context.Background(), key, tempFile, true)
+				tempFile.Close()
+				os.Remove(tempFile.Name())
 				if err != nil {
 					b.Fatalf("DownloadFile failed: %v", err)
 				}
-				reader.Close()
 			}
 
 			fileService.DeleteFile(context.Background(), key)

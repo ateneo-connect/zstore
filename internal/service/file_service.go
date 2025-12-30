@@ -121,7 +121,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 }
 
 // DownloadFile downloads a file from cloud storage
-func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
+func (s *FileService) DownloadFile(ctx context.Context, key string, dest io.WriterAt, quiet bool) error {
 	// Get prefix and filename for metadata lookup
 	prefix := filepath.Dir(key)
 	fileName := filepath.Base(key)
@@ -129,7 +129,7 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 	// Get metadata
 	metadata, err := s.metadataRepo.GetMetadata(ctx, prefix, fileName)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	log.Debugf("Object Metadata: %+v\n", metadata)
@@ -137,7 +137,7 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 	// Download shards to temporary files
 	tempFilePaths, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Cleanup temp files when done
@@ -150,10 +150,12 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, quiet bool) 
 	// Reconstruct file from temp files
 	reconstructedData, err := ReconstructFileFromPaths(tempFilePaths, metadata)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return io.NopCloser(bytes.NewReader(reconstructedData)), nil
+	// Write reconstructed data to destination
+	_, err = dest.WriteAt(reconstructedData, 0)
+	return err
 }
 
 // DeleteFile deletes a file from cloud storage
@@ -313,39 +315,25 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 		log.Infof("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
 
 		downloadStart := time.Now()
-		reader, err := repo.Download(ctx, shardInfo.Key, quiet)
-		if err != nil {
-			log.Warnf("Failed to download shard %d: %v", i, err)
-			failedShards++
-			continue
-		}
-		log.Infof("[PERF] Shard %d: Download initiation took %v", i, time.Since(downloadStart))
-
 		// Create temp file for this shard
-		fileStart := time.Now()
 		tempFile, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
 		if err != nil {
 			log.Warnf("Failed to create temp file for shard %d: %v", i, err)
-			reader.Close()
 			failedShards++
 			continue
 		}
 		tempFilePath := tempFile.Name()
-		log.Infof("[PERF] Shard %d: Temp file creation took %v", i, time.Since(fileStart))
-
-		// Stream shard data directly to temp file
-		copyStart := time.Now()
-		bytesWritten, err := io.Copy(tempFile, reader)
-		reader.Close()
+		
+		// Download directly to temp file using new WriterAt interface
+		err = repo.Download(ctx, shardInfo.Key, tempFile, quiet)
 		tempFile.Close()
-		copyDuration := time.Since(copyStart)
 		if err != nil {
-			log.Warnf("Failed to write shard %d to temp file: %v", i, err)
+			log.Warnf("Failed to download shard %d: %v", i, err)
 			os.Remove(tempFilePath)
 			failedShards++
 			continue
 		}
-		log.Infof("[PERF] Shard %d: Copied %d bytes in %v (%.2f MB/s)", i, bytesWritten, copyDuration, float64(bytesWritten)/copyDuration.Seconds()/1024/1024)
+		log.Infof("[PERF] Shard %d: Download took %v", i, time.Since(downloadStart))
 
 		// TODO: Skip integrity verification for performance testing
 		// Verify shard integrity by reading temp file

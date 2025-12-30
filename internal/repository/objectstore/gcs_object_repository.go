@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"cloud.google.com/go/storage"
+	"cloud.google.com/go/storage/transfermanager"
 	"github.com/schollz/progressbar/v3"
 	log "github.com/sirupsen/logrus"
 )
@@ -14,6 +15,7 @@ import (
 type GCSObjectRepository struct {
 	client     *storage.Client
 	bucketName string
+	downloader *transfermanager.Downloader
 }
 
 // Upload uploads an object to GCS
@@ -71,31 +73,34 @@ func (pr *progressReader) Close() error {
 }
 
 // Download downloads an object from GCS
-func (r *GCSObjectRepository) Download(ctx context.Context, key string, quiet bool) (io.ReadCloser, error) {
-	bucket := r.client.Bucket(r.bucketName)
-	obj := bucket.Object(key)
-
+func (r *GCSObjectRepository) Download(ctx context.Context, key string, dest io.WriterAt, quiet bool) error {
 	if !quiet {
 		log.Debugf("Downloading from GCS: gs://%s/%s", r.bucketName, key)
 	}
 
-	reader, err := obj.NewReader(ctx)
+	// Initialize downloader if not already done
+	if r.downloader == nil {
+		var err error
+		r.downloader, err = transfermanager.NewDownloader(r.client)
+		if err != nil {
+			return fmt.Errorf("failed to create GCS downloader: %w", err)
+		}
+	}
+
+	// Create download input
+	input := &transfermanager.DownloadObjectInput{
+		Bucket:      r.bucketName,
+		Object:      key,
+		Destination: dest,
+	}
+
+	// Download object
+	err := r.downloader.DownloadObject(ctx, input)
 	if err != nil {
-		return nil, fmt.Errorf("failed to download from GCS: %w", err)
+		return fmt.Errorf("failed to download from GCS: %w", err)
 	}
 
-	if quiet {
-		return reader, nil
-	}
-
-	// Get object attributes for progress bar
-	attrs, err := obj.Attrs(ctx)
-	var bar *progressbar.ProgressBar
-	if err == nil {
-		bar = progressbar.DefaultBytes(attrs.Size, "downloading")
-	}
-
-	return &progressReader{r: reader, bar: bar}, nil
+	return nil
 }
 
 // Delete deletes an object from GCS
