@@ -87,30 +87,26 @@ func (r *GCSObjectRepository) Download(ctx context.Context, key string, dest io.
 	}
 	log.Debugf("GCS object %s size: %d bytes", key, attrs.Size)
 
-	// Initialize downloader if not already done
-	if r.downloader == nil {
-		var err error
-		r.downloader, err = transfermanager.NewDownloader(r.client)
-		if err != nil {
-			return fmt.Errorf("failed to create GCS downloader: %w", err)
-		}
-	}
-
-	// Create download input
-	input := &transfermanager.DownloadObjectInput{
-		Bucket:      r.bucketName,
-		Object:      key,
-		Destination: dest,
-	}
-
-	// Download object
-	log.Debugf("Starting GCS download for %s", key)
-	err = r.downloader.DownloadObject(ctx, input)
+	// Create reader for the object
+	reader, err := obj.NewReader(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to download from GCS: %w", err)
+		return fmt.Errorf("failed to create GCS reader: %w", err)
 	}
-	log.Debugf("Completed GCS download for %s", key)
+	defer reader.Close()
 
+	// Read all data
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("failed to read from GCS: %w", err)
+	}
+
+	// Write to destination at offset 0
+	_, err = dest.WriteAt(data, 0)
+	if err != nil {
+		return fmt.Errorf("failed to write to destination: %w", err)
+	}
+
+	log.Debugf("Completed GCS download for %s, wrote %d bytes", key, len(data))
 	return nil
 }
 
