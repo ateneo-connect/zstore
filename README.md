@@ -220,21 +220,36 @@ Tests require the `ZSTORE_CONFIG_PATH` environment variable to be set. Create a 
 Zstore includes comprehensive benchmarks to measure performance across different scenarios:
 
 ```bash
-# Run all benchmarks
-go test -bench=. ./tests/service/
+# Run all benchmarks (both erasure-coded and raw operations)
+go test -bench=. "-run=^$" ./tests/service/
+
+# Run only erasure-coded benchmarks
+go test -bench=BenchmarkFileService_ErasureCoded "-run=^$" ./tests/service/
+
+# Run only raw operation benchmarks
+go test -bench=BenchmarkRawFileService "-run=^$" ./tests/service/
 
 # Run specific benchmark categories
-go test -bench=BenchmarkFileService_UploadFile ./tests/service/
-go test -bench=BenchmarkFileService_DownloadFile ./tests/service/
-go test -bench=BenchmarkFileService_ConcurrencyComparison ./tests/service/
+go test -bench=BenchmarkFileService_ErasureCoded_UploadFile "-run=^$" ./tests/service/
+go test -bench=BenchmarkRawFileService_UploadFile "-run=^$" ./tests/service/
+go test -bench=BenchmarkRawFileService_CrossProvider_Comparison "-run=^$" ./tests/service/
 ```
 
 **Benchmark Categories:**
-- **Upload Performance**: Tests erasure-coded uploads across file sizes (1KB to 10MB)
-- **Download Performance**: Tests erasure-coded downloads with and without integrity verification
-- **Concurrency Impact**: Compares performance across different concurrency levels (1-5)
-- **Raw Operations**: Direct bucket uploads/downloads without erasure coding
-- **Cross-Provider**: Performance comparison between S3 and GCS buckets
+- **Erasure-Coded Operations**: Tests file operations with Reed-Solomon encoding across multiple buckets
+  - `BenchmarkFileService_ErasureCoded_UploadFile`: Upload performance across file sizes (1KB to 10MB)
+  - `BenchmarkFileService_ErasureCoded_DownloadFile`: Download performance with shard reconstruction
+  - `BenchmarkFileService_ErasureCoded_ConcurrencyComparison`: Impact of concurrency levels (1-5)
+- **Raw Operations**: Direct storage operations without erasure coding
+  - `BenchmarkRawFileService_UploadFile`: Direct uploads to S3/GCS buckets by provider
+  - `BenchmarkRawFileService_DownloadFile`: Direct downloads from S3/GCS buckets by provider
+  - `BenchmarkRawFileService_CrossProvider_Comparison`: Performance comparison between S3 and GCS
+
+**Benchmark Results Format:**
+- **Erasure-coded**: `BenchmarkFileService_ErasureCoded_UploadFile/1KB-16`
+- **Raw S3**: `BenchmarkRawFileService_UploadFile/s3_primary/1KB-16`
+- **Raw GCS**: `BenchmarkRawFileService_UploadFile/gcs_secondary/1KB-16`
+- **Cross-provider**: `BenchmarkRawFileService_CrossProvider_Comparison/Raw_s3_primary-16`
 
 **Metrics Measured:**
 - **Throughput**: MB/s for upload/download operations
