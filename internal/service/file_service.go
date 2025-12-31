@@ -121,7 +121,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 }
 
 // DownloadFile downloads a file from cloud storage
-func (s *FileService) DownloadFile(ctx context.Context, key string, dest io.WriterAt, quiet bool) error {
+func (s *FileService) DownloadFile(ctx context.Context, key string, dest io.WriterAt, quiet bool, verifyIntegrity bool) error {
 	// Get prefix and filename for metadata lookup
 	prefix := filepath.Dir(key)
 	fileName := filepath.Base(key)
@@ -135,7 +135,7 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, dest io.Writ
 	log.Debugf("Object Metadata: %+v\n", metadata)
 
 	// Download shards to temporary files
-	tempFilePaths, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet)
+	tempFilePaths, err := s.downloadShards(ctx, metadata.ShardHashes, metadata.ParityShards, quiet, verifyIntegrity)
 	if err != nil {
 		return err
 	}
@@ -277,7 +277,7 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 }
 
 // downloadShards downloads shards using dynamic concurrency strategy with temp files
-func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool) ([]string, error) {
+func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.ShardStorage, parityShards int, quiet bool, verifyIntegrity bool) ([]string, error) {
 	// Dynamic Shard Downloading Strategy:
 	// 1. Start with limited concurrent downloads (s.concurrency)
 	// 2. When a shard completes, check if we need more shards
@@ -301,7 +301,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 	// This prevents overwhelming the network with too many simultaneous requests
 	for i := 0; i < s.concurrency && i < len(shardHashes); i++ {
 		wg.Add(1)
-		go s.downloadShard(ctx, &wg, &mu, tempFilePaths, shardHashes[i], i, quiet, &successfulShards, &nextShardIndex, minShardsNeeded, shardHashes, cancel)
+		go s.downloadShard(ctx, &wg, &mu, tempFilePaths, shardHashes[i], i, quiet, &successfulShards, &nextShardIndex, minShardsNeeded, shardHashes, cancel, verifyIntegrity)
 	}
 
 	// Phase 2: Wait for all download goroutines to complete
@@ -354,7 +354,7 @@ func verifyFileIntegrity(data []byte, expectedHash string) error {
 // 2. Verifies shard integrity using CRC64 hash
 // 3. Decides whether to start downloading additional shards
 // 4. Handles early termination when enough shards are available
-func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, tempFilePaths []string, shardInfo domain.ShardStorage, i int, quiet bool, successfulShards *int, nextShardIndex *int, minShardsNeeded int, allShards []domain.ShardStorage, cancel context.CancelFunc) {
+func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu *sync.Mutex, tempFilePaths []string, shardInfo domain.ShardStorage, i int, quiet bool, successfulShards *int, nextShardIndex *int, minShardsNeeded int, allShards []domain.ShardStorage, cancel context.CancelFunc, verifyIntegrity bool) {
 	defer wg.Done()
 
 	// Early termination check: stop if context was cancelled
@@ -374,7 +374,7 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	if err != nil {
 		// Mark shard as failed and potentially start next download
 		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
 		return
 	}
 	log.Debugf("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
@@ -384,7 +384,7 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	tempFile, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
 	if err != nil {
 		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
 		return
 	}
 	tempFilePath := tempFile.Name()
@@ -407,7 +407,7 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 		log.Errorf("Shard %d download failed: %v", i, err)
 		os.Remove(tempFilePath)
 		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
 		return
 	}
 
@@ -425,19 +425,21 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 		log.Errorf("Shard %d: Failed to read temp file: %v", i, err)
 		os.Remove(tempFilePath)
 		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
 		return
 	}
 	log.Debugf("[PERF] Shard %d: Copied %d bytes in %v (%.2f MB/s)", i, len(shardData), time.Since(copyStart), float64(len(shardData))/1024/1024/time.Since(copyStart).Seconds())
 
-	// Step 4: Verify shard integrity using CRC64 hash
+	// Step 4: Verify shard integrity using CRC64 hash (optional)
 	// This ensures downloaded data matches what was originally stored
-	if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
-		log.Warnf("Shard %d failed integrity check", i)
-		os.Remove(tempFilePath)
-		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
-		return
+	if verifyIntegrity {
+		if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
+			log.Warnf("Shard %d failed integrity check", i)
+			os.Remove(tempFilePath)
+			tempFilePaths[i] = ""
+			s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
+			return
+		}
 	}
 
 	// Step 5: Successfully downloaded shard
@@ -460,14 +462,14 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 
 	// Step 7: Dynamic concurrency - start next download if needed
 	// This maintains optimal network utilization by keeping downloads active
-	s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet)
+	s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
 }
 
 // maybeStartNext implements the dynamic concurrency control logic
 // This function decides whether to start downloading the next available shard
 // based on current progress and remaining needs. It's called after each
 // shard completion (success or failure) to maintain optimal download flow.
-func (s *FileService) maybeStartNext(wg *sync.WaitGroup, mu *sync.Mutex, tempFilePaths []string, successfulShards *int, nextShardIndex *int, minShardsNeeded int, allShards []domain.ShardStorage, ctx context.Context, cancel context.CancelFunc, quiet bool) {
+func (s *FileService) maybeStartNext(wg *sync.WaitGroup, mu *sync.Mutex, tempFilePaths []string, successfulShards *int, nextShardIndex *int, minShardsNeeded int, allShards []domain.ShardStorage, ctx context.Context, cancel context.CancelFunc, quiet bool, verifyIntegrity bool) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -486,7 +488,7 @@ func (s *FileService) maybeStartNext(wg *sync.WaitGroup, mu *sync.Mutex, tempFil
 		// Start new download goroutine for the claimed shard
 		// This maintains the concurrency level as other downloads complete
 		wg.Add(1)
-		go s.downloadShard(ctx, wg, mu, tempFilePaths, allShards[currentIndex], currentIndex, quiet, successfulShards, nextShardIndex, minShardsNeeded, allShards, cancel)
+		go s.downloadShard(ctx, wg, mu, tempFilePaths, allShards[currentIndex], currentIndex, quiet, successfulShards, nextShardIndex, minShardsNeeded, allShards, cancel, verifyIntegrity)
 	}
 	// If conditions not met, no new download is started, allowing
 	// the system to naturally wind down as remaining downloads complete

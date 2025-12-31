@@ -88,7 +88,7 @@ func TestFileService_UploadDownloadDelete_Integration(t *testing.T) {
 			}
 			defer os.Remove(tempFile.Name())
 			
-			err = fileService.DownloadFile(context.Background(), key, tempFile, true)
+			err = fileService.DownloadFile(context.Background(), key, tempFile, true, false)
 			if err != nil {
 				t.Fatalf("DownloadFile failed: %v", err)
 			}
@@ -115,7 +115,7 @@ func TestFileService_UploadDownloadDelete_Integration(t *testing.T) {
 
 			tempFile2, _ := os.CreateTemp("", "test2_*.tmp")
 			defer os.Remove(tempFile2.Name())
-			err = fileService.DownloadFile(context.Background(), key, tempFile2, true)
+			err = fileService.DownloadFile(context.Background(), key, tempFile2, true, false)
 			tempFile2.Close()
 			if err == nil {
 				t.Error("Expected download to fail after deletion, but it succeeded")
@@ -159,7 +159,7 @@ func TestFileService_UploadDownload_DifferentShardConfigurations(t *testing.T) {
 			}
 			defer os.Remove(tempFile.Name())
 			
-			err = fileService.DownloadFile(context.Background(), key, tempFile, true)
+			err = fileService.DownloadFile(context.Background(), key, tempFile, true, false)
 			if err != nil {
 				t.Fatalf("DownloadFile failed: %v", err)
 			}
@@ -211,7 +211,7 @@ func TestFileService_ConcurrentOperations(t *testing.T) {
 		}
 		defer os.Remove(tempFile.Name())
 		
-		err = fileService.DownloadFile(context.Background(), key, tempFile, true)
+		err = fileService.DownloadFile(context.Background(), key, tempFile, true, false)
 		if err != nil {
 			t.Fatalf("DownloadFile %d failed: %v", i, err)
 		}
@@ -274,7 +274,7 @@ func TestFileService_AutoDetectFilename(t *testing.T) {
 	}
 	defer os.Remove(tempFile.Name())
 	
-	err = fileService.DownloadFile(context.Background(), expectedKey, tempFile, true)
+	err = fileService.DownloadFile(context.Background(), expectedKey, tempFile, true, false)
 	if err != nil {
 		t.Fatalf("DownloadFile failed: %v", err)
 	}
