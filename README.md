@@ -131,6 +131,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 ### Download Options
 - `--concurrency`: Number of concurrent shard downloads (default: 3)
+- `--verify-integrity`: Enable CRC64 hash verification of downloaded shards (default: false)
 
 ### Raw Operations
 - `upload-raw`: Upload files directly to S3 without erasure coding (uses s3:// URLs, supports --quiet)
