@@ -241,11 +241,6 @@ go test -bench=BenchmarkFileService_ConcurrencyComparison ./tests/service/
 - **Memory Usage**: Allocation patterns and peak memory consumption
 - **Concurrency Scaling**: Performance gains from parallel operations
 
-**Performance Expectations:**
-- **Erasure-coded downloads**: 270-400+ MB/s with parallel shard processing
-- **Memory usage**: ~250MB for 1GB files (6x reduction from previous implementation)
-- **Integrity verification**: Optional CRC64 checking with `--verify-integrity` flag
-
 ## Architecture
 
 ### Components
