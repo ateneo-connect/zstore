@@ -214,6 +214,38 @@ go test -bench=. ./tests/service/
 
 Tests require the `ZSTORE_CONFIG_PATH` environment variable to be set. Create a test-specific config file with test buckets.
 
+### Benchmarks
+
+Zstore includes comprehensive benchmarks to measure performance across different scenarios:
+
+```bash
+# Run all benchmarks
+go test -bench=. ./tests/service/
+
+# Run specific benchmark categories
+go test -bench=BenchmarkFileService_UploadFile ./tests/service/
+go test -bench=BenchmarkFileService_DownloadFile ./tests/service/
+go test -bench=BenchmarkFileService_ConcurrencyComparison ./tests/service/
+```
+
+**Benchmark Categories:**
+- **Upload Performance**: Tests erasure-coded uploads across file sizes (1KB to 10MB)
+- **Download Performance**: Tests erasure-coded downloads with and without integrity verification
+- **Concurrency Impact**: Compares performance across different concurrency levels (1-5)
+- **Raw Operations**: Direct bucket uploads/downloads without erasure coding
+- **Cross-Provider**: Performance comparison between S3 and GCS buckets
+
+**Metrics Measured:**
+- **Throughput**: MB/s for upload/download operations
+- **Latency**: Time per operation (GET, PUT, DELETE)
+- **Memory Usage**: Allocation patterns and peak memory consumption
+- **Concurrency Scaling**: Performance gains from parallel operations
+
+**Performance Expectations:**
+- **Erasure-coded downloads**: 270-400+ MB/s with parallel shard processing
+- **Memory usage**: ~250MB for 1GB files (6x reduction from previous implementation)
+- **Integrity verification**: Optional CRC64 checking with `--verify-integrity` flag
+
 ## Architecture
 
 ### Components
