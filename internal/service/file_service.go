@@ -429,9 +429,10 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 	}
 	log.Debugf("[PERF] Shard %d: Repository lookup took %v", i, time.Since(repoStart))
 
-	// Step 2: Create temp file for this shard
+	// Step 2: Create temp file for this shard in current directory
 	tempFileStart := time.Now()
-	tempFile, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
+	cwd, _ := os.Getwd()
+	tempFile, err := os.CreateTemp(cwd, fmt.Sprintf("shard_%d_*.tmp", i))
 	if err != nil {
 		tempFilePaths[i] = ""
 		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)

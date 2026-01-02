@@ -42,13 +42,17 @@ func setupCleanupHandler() {
 	}()
 }
 
-// cleanupTempFiles removes any leftover temp files
+// cleanupTempFiles removes any leftover temp files from current directory
 func cleanupTempFiles() {
-	tempDir := os.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	
 	patterns := []string{"shard_*.tmp", "reconstruct_*.tmp"}
 	
 	for _, pattern := range patterns {
-		matches, err := filepath.Glob(filepath.Join(tempDir, pattern))
+		matches, err := filepath.Glob(filepath.Join(cwd, pattern))
 		if err != nil {
 			continue
 		}

@@ -47,9 +47,10 @@ func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (
 		return domain.ObjectMetadata{}, nil, err
 	}
 
-	// Create temporary files for all shards
+	// Create temporary files for all shards in current directory
 	totalShards := dataShards + parityShards
 	shardFiles := make([]*os.File, totalShards)
+	cwd, _ := os.Getwd()
 	
 	// Ensure cleanup on error
 	defer func() {
@@ -64,7 +65,7 @@ func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (
 	}()
 	
 	for i := 0; i < totalShards; i++ {
-		file, createErr := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
+		file, createErr := os.CreateTemp(cwd, fmt.Sprintf("shard_%d_*.tmp", i))
 		if createErr != nil {
 			err = createErr
 			return domain.ObjectMetadata{}, nil, err
@@ -233,10 +234,11 @@ func ReconstructFileStream(shardReaders []io.Reader, dest io.Writer, meta domain
 			}
 		}()
 		
-		// Create temp files for missing shards
+		// Create temp files for missing shards in current directory
+		cwd, _ := os.Getwd()
 		for i := 0; i < totalShards; i++ {
 			if shardReaders[i] == nil {
-				tempFile, err := os.CreateTemp("", fmt.Sprintf("reconstruct_%d_*.tmp", i))
+				tempFile, err := os.CreateTemp(cwd, fmt.Sprintf("reconstruct_%d_*.tmp", i))
 				if err != nil {
 					return err
 				}
