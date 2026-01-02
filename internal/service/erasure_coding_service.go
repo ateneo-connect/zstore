@@ -205,6 +205,85 @@ func ReconstructFileFromFiles(shardFiles []*os.File, meta domain.ObjectMetadata)
 	return buf.Bytes(), nil
 }
 
+// ReconstructFileStream reconstructs a file from shard readers using streaming to minimize memory usage
+// This is the memory-efficient version for large files
+func ReconstructFileStream(shardReaders []io.Reader, dest io.Writer, meta domain.ObjectMetadata) error {
+	totalShards := len(meta.ShardHashes)
+	dataShards := totalShards - meta.ParityShards
+	parityShards := meta.ParityShards
+
+	enc, err := reedsolomon.NewStream(dataShards, parityShards)
+	if err != nil {
+		return err
+	}
+
+	// Verify and reconstruct if needed
+	ok, err := enc.Verify(shardReaders)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		// Need reconstruction - create temp files for missing shards
+		tempFiles := make([]*os.File, totalShards)
+		outWriters := make([]io.Writer, totalShards)
+		
+		// Create temp files for missing shards
+		for i := 0; i < totalShards; i++ {
+			if shardReaders[i] == nil {
+				tempFile, err := os.CreateTemp("", fmt.Sprintf("reconstruct_%d_*.tmp", i))
+				if err != nil {
+					// Clean up any created temp files
+					for j := 0; j < i; j++ {
+						if tempFiles[j] != nil {
+							tempFiles[j].Close()
+							os.Remove(tempFiles[j].Name())
+						}
+					}
+					return err
+				}
+				tempFiles[i] = tempFile
+				outWriters[i] = tempFile
+			}
+		}
+
+		// Perform reconstruction
+		err = enc.Reconstruct(shardReaders, outWriters)
+		if err != nil {
+			// Clean up temp files on error
+			for _, file := range tempFiles {
+				if file != nil {
+					file.Close()
+					os.Remove(file.Name())
+				}
+			}
+			return err
+		}
+
+		// Update readers to include reconstructed shards
+		for i, file := range tempFiles {
+			if file != nil {
+				file.Seek(0, 0)
+				shardReaders[i] = file
+			}
+		}
+
+		// Clean up temp files when done
+		defer func() {
+			for _, file := range tempFiles {
+				if file != nil {
+					file.Close()
+					os.Remove(file.Name())
+				}
+			}
+		}()
+	}
+
+	// Join the data shards to reconstruct original file
+	dataReaders := shardReaders[:dataShards]
+	return enc.Join(dest, dataReaders, meta.OriginalSize)
+}
+
 func ReconstructFileFromPaths(filePaths []string, meta domain.ObjectMetadata) ([]byte, error) {
 	totalShards := len(meta.ShardHashes)
 	dataShards := totalShards - meta.ParityShards

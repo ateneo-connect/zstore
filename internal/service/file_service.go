@@ -66,22 +66,33 @@ func NewFileService(placer placement.Placer, metadataRepo MetadataRepository) *F
 func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, quiet bool, dataShards, parityShards, concurrency int) error {
 	start := time.Now()
 
-	// Read file data
-	readStart := time.Now()
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return err
-	}
-	log.Debugf("File read took: %v", time.Since(readStart))
-
-	// Check for empty file
-	if len(data) == 0 {
-		return errors.ErrEmptyFile
+	// Get file size if possible for streaming optimization
+	var fileSize int64 = -1
+	if seeker, ok := r.(io.Seeker); ok {
+		if current, err := seeker.Seek(0, io.SeekCurrent); err == nil {
+			if end, err := seeker.Seek(0, io.SeekEnd); err == nil {
+				fileSize = end - current
+				seeker.Seek(current, io.SeekStart) // Reset position
+			}
+		}
 	}
 
-	// Create shards using erasure coding
+	// If we can't determine size, we need to read into memory (fallback)
+	if fileSize == -1 {
+		data, err := io.ReadAll(r)
+		if err != nil {
+			return err
+		}
+		if len(data) == 0 {
+			return errors.ErrEmptyFile
+		}
+		r = bytes.NewReader(data)
+		fileSize = int64(len(data))
+	}
+
+	// Create shards using streaming erasure coding
 	shardStart := time.Now()
-	metadata, shardFiles, err := ShardFile(bytes.NewReader(data), dataShards, parityShards, int64(len(data)))
+	metadata, shardFiles, err := ShardFile(r, dataShards, parityShards, fileSize)
 	if err != nil {
 		return err
 	}
@@ -155,15 +166,44 @@ func (s *FileService) DownloadFile(ctx context.Context, key string, dest io.Writ
 		}
 	}()
 
-	// Reconstruct file from temp files
-	reconstructedData, err := ReconstructFileFromPaths(tempFilePaths, metadata)
-	if err != nil {
-		return err
+	// Reconstruct file from temp files using streaming
+	// Create readers from temp file paths
+	shardReaders := make([]io.Reader, len(tempFilePaths))
+	var tempFiles []*os.File
+	for i, path := range tempFilePaths {
+		if path != "" {
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			shardReaders[i] = file
+			tempFiles = append(tempFiles, file)
+		}
 	}
 
-	// Write reconstructed data to destination
-	_, err = dest.WriteAt(reconstructedData, 0)
+	// Close temp files when done
+	defer func() {
+		for _, file := range tempFiles {
+			file.Close()
+		}
+	}()
+
+	// Use streaming reconstruction with WriterAt wrapper
+	writerAtWrapper := &writerAtWrapper{dest: dest}
+	err = ReconstructFileStream(shardReaders, writerAtWrapper, metadata)
 	return err
+}
+
+// writerAtWrapper wraps io.WriterAt to implement io.Writer
+type writerAtWrapper struct {
+	dest   io.WriterAt
+	offset int64
+}
+
+func (w *writerAtWrapper) Write(p []byte) (n int, err error) {
+	n, err = w.dest.WriteAt(p, w.offset)
+	w.offset += int64(n)
+	return n, err
 }
 
 // DeleteFile deletes a file from cloud storage
@@ -335,16 +375,26 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 	return successfulPaths, nil
 }
 
-// verifyFileIntegrity checks if the reconstructed file matches the expected CRC64 hash
-func verifyFileIntegrity(data []byte, expectedHash string) error {
-	table := crc64.MakeTable(crc64.ISO)
-	fileHash := fmt.Sprintf("%016x", crc64.Checksum(data, table))
-
-	if fileHash != expectedHash {
-		log.Debugf("Integrity check failed: expected %s, got %s", expectedHash, fileHash)
-		return errors.ErrFileIntegrityCheck
+// verifyShardIntegrity verifies a shard file's CRC64 hash using streaming to avoid memory loading
+func verifyShardIntegrity(filePath string, expectedHash string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file for verification: %w", err)
 	}
-	log.Debugf("File integrity check passed: %s", fileHash)
+	defer file.Close()
+	
+	table := crc64.MakeTable(crc64.ISO)
+	hash := crc64.New(table)
+	_, err = io.Copy(hash, file)
+	if err != nil {
+		return fmt.Errorf("failed to calculate hash: %w", err)
+	}
+	
+	fileHash := fmt.Sprintf("%016x", hash.Sum64())
+	if fileHash != expectedHash {
+		return fmt.Errorf("integrity check failed: expected %s, got %s", expectedHash, fileHash)
+	}
+	
 	return nil
 }
 
@@ -418,28 +468,16 @@ func (s *FileService) downloadShard(ctx context.Context, wg *sync.WaitGroup, mu 
 		log.Errorf("Shard %d: Failed to stat temp file: %v", i, err)
 	}
 
-	// Copy temp file content for performance measurement
-	copyStart := time.Now()
-	shardData, err := os.ReadFile(tempFilePath)
-	if err != nil {
-		log.Errorf("Shard %d: Failed to read temp file: %v", i, err)
-		os.Remove(tempFilePath)
-		tempFilePaths[i] = ""
-		s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
-		return
-	}
-	log.Debugf("[PERF] Shard %d: Copied %d bytes in %v (%.2f MB/s)", i, len(shardData), time.Since(copyStart), float64(len(shardData))/1024/1024/time.Since(copyStart).Seconds())
-
 	// Step 4: Verify shard integrity using CRC64 hash (optional)
-	// This ensures downloaded data matches what was originally stored
 	if verifyIntegrity {
-		if err := verifyFileIntegrity(shardData, shardInfo.Hash); err != nil {
-			log.Warnf("Shard %d failed integrity check", i)
+		if err := verifyShardIntegrity(tempFilePath, shardInfo.Hash); err != nil {
+			log.Warnf("Shard %d failed integrity check: %v", i, err)
 			os.Remove(tempFilePath)
 			tempFilePaths[i] = ""
 			s.maybeStartNext(wg, mu, tempFilePaths, successfulShards, nextShardIndex, minShardsNeeded, allShards, ctx, cancel, quiet, verifyIntegrity)
 			return
 		}
+		log.Debugf("Shard %d integrity check passed", i)
 	}
 
 	// Step 5: Successfully downloaded shard
