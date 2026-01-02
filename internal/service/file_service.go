@@ -81,11 +81,19 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 
 	// Create shards using erasure coding
 	shardStart := time.Now()
-	metadata, shards, err := ShardFile(data, dataShards, parityShards)
+	metadata, shardFiles, err := ShardFile(bytes.NewReader(data), dataShards, parityShards, int64(len(data)))
 	if err != nil {
 		return err
 	}
 	log.Debugf("Sharding took: %v", time.Since(shardStart))
+
+	// Cleanup shard files when done
+	defer func() {
+		for _, file := range shardFiles {
+			file.Close()
+			os.Remove(file.Name())
+		}
+	}()
 
 	log.Debugf("Uploading %s", key)
 
@@ -107,7 +115,7 @@ func (s *FileService) UploadFile(ctx context.Context, key string, r io.Reader, q
 
 	// Upload shards in parallel
 	uploadStart := time.Now()
-	if err := s.uploadShards(ctx, key, shards, &metadata, quiet, concurrency, parityShards); err != nil {
+	if err := s.uploadShardsFromFiles(ctx, key, shardFiles, &metadata, quiet, concurrency, parityShards); err != nil {
 		return err
 	}
 	log.Debugf("Shard uploads took: %v", time.Since(uploadStart))
@@ -177,33 +185,28 @@ func (s *FileService) DeleteFile(ctx context.Context, key string) error {
 	return s.metadataRepo.DeleteMetadata(ctx, prefix, fileName)
 }
 
-// uploadShards uploads erasure-coded shards in parallel with concurrency control
-// This function implements the core shard upload strategy:
-// 1. Creates goroutines for each shard upload (limited by semaphore)
-// 2. Uses fail-fast logic - stops if too many uploads fail
-// 3. Updates metadata with actual storage locations after successful uploads
-func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]byte, metadata *domain.ObjectMetadata, quiet bool, concurrency, parityShards int) error {
+// uploadShardsFromFiles uploads erasure-coded shards from temp files in parallel with concurrency control
+func (s *FileService) uploadShardsFromFiles(ctx context.Context, key string, shardFiles []*os.File, metadata *domain.ObjectMetadata, quiet bool, concurrency, parityShards int) error {
 	// Setup channels for goroutine coordination
 	var wg sync.WaitGroup
-	errorCh := make(chan error, len(shards)) // Buffered to prevent goroutine blocking
-	pathCh := make(chan struct {             // Channel for successful upload results
+	errorCh := make(chan error, len(shardFiles)) // Buffered to prevent goroutine blocking
+	pathCh := make(chan struct {                 // Channel for successful upload results
 		index       int    // Shard index for metadata update
 		storageType string // Storage backend type (e.g., "s3", "gcs")
 		bucketName  string // Cloud storage bucket name
 		key         string // Actual storage key where shard was stored
-	}, len(shards))
+	}, len(shardFiles))
 	semaphore := make(chan struct{}, concurrency) // Limits concurrent uploads
 
 	// Launch upload goroutines for each shard
-	for i, shard := range shards {
+	for i, shardFile := range shardFiles {
 		wg.Add(1)
-		go func(i int, shard []byte) {
+		go func(i int, shardFile *os.File) {
 			defer wg.Done()
 			semaphore <- struct{}{}        // Acquire semaphore slot
 			defer func() { <-semaphore }() // Release semaphore slot
 
 			// Generate shard key using original hash from metadata
-			// Format: "original-file-key/shard-hash"
 			originalHash := metadata.ShardHashes[i].Hash
 			shardKey := fmt.Sprintf("%s/%s", key, originalHash)
 
@@ -214,15 +217,15 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 				return
 			}
 
-			// Upload shard to selected bucket
-			path, err := repo.Upload(ctx, shardKey, bytes.NewReader(shard), quiet)
+			// Reset file position and upload shard from file
+			shardFile.Seek(0, 0)
+			path, err := repo.Upload(ctx, shardKey, shardFile, quiet)
 			if err != nil {
 				errorCh <- err // Send error to main thread
 				return
 			}
 
 			// Parse returned path to extract actual storage key
-			// Expected format: "bucket/actual-key"
 			parts := strings.SplitN(path, "/", 2)
 			pathCh <- struct {
 				index       int
@@ -235,7 +238,7 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 				bucketName:  bucketName,
 				key:         parts[1], // Extract key part after bucket
 			}
-		}(i, shard)
+		}(i, shardFile)
 	}
 
 	// Wait for all uploads to complete
@@ -244,8 +247,6 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 	close(pathCh)
 
 	// Implement fail-fast error handling
-	// Reed-Solomon can tolerate up to 'parityShards' failures
-	// If more than parityShards fail, we cannot guarantee reconstruction
 	errorCount := 0
 	var uploadErr error
 	for err := range errorCh {
@@ -266,7 +267,6 @@ func (s *FileService) uploadShards(ctx context.Context, key string, shards [][]b
 	}
 
 	// Update metadata with actual storage locations
-	// This allows the download process to find shards later
 	for result := range pathCh {
 		metadata.ShardHashes[result.index].StorageType = result.storageType
 		metadata.ShardHashes[result.index].BucketName = result.bucketName

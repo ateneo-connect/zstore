@@ -16,9 +16,10 @@
 // - CRC64 integrity hashing for each shard
 // - Metadata generation with shard information
 // - Efficient reconstruction algorithm
+// - Streaming support for minimal memory usage regardless of file size
 //
 // Usage:
-//   metadata, shards, err := ShardFile(data, 4, 2)  // 4 data + 2 parity shards
+//   metadata, shardFiles, err := ShardFile(reader, 4, 2, fileSize)  // 4 data + 2 parity shards
 //   reconstructed, err := ReconstructFile(shards, metadata)
 //
 // The service integrates with FileService to provide distributed, fault-tolerant
@@ -38,42 +39,108 @@ import (
 
 
 
-func ShardFile(data []byte, dataShards, parityShards int) (domain.ObjectMetadata, [][]byte, error) {
-	enc, err := reedsolomon.New(dataShards, parityShards)
+// ShardFile splits a file into shards using streaming to minimize memory usage
+// Returns metadata and temporary shard files that caller must manage
+func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (domain.ObjectMetadata, []*os.File, error) {
+	enc, err := reedsolomon.NewStream(dataShards, parityShards)
 	if err != nil {
 		return domain.ObjectMetadata{}, nil, err
 	}
 
-	shards, err := enc.Split(data)
+	// Create temporary files for all shards
+	totalShards := dataShards + parityShards
+	shardFiles := make([]*os.File, totalShards)
+	for i := 0; i < totalShards; i++ {
+		file, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
+		if err != nil {
+			// Clean up any created files
+			for j := 0; j < i; j++ {
+				shardFiles[j].Close()
+				os.Remove(shardFiles[j].Name())
+			}
+			return domain.ObjectMetadata{}, nil, err
+		}
+		shardFiles[i] = file
+	}
+
+	// Split data into data shards
+	dataWriters := make([]io.Writer, dataShards)
+	for i := 0; i < dataShards; i++ {
+		dataWriters[i] = shardFiles[i]
+	}
+
+	err = enc.Split(reader, dataWriters, fileSize)
 	if err != nil {
+		// Clean up files on error
+		for _, file := range shardFiles {
+			file.Close()
+			os.Remove(file.Name())
+		}
 		return domain.ObjectMetadata{}, nil, err
 	}
 
-	if err := enc.Encode(shards); err != nil {
+	// Create readers from data files for parity generation
+	dataReaders := make([]io.Reader, dataShards)
+	for i := 0; i < dataShards; i++ {
+		shardFiles[i].Seek(0, 0)
+		dataReaders[i] = shardFiles[i]
+	}
+
+	// Create parity writers
+	parityWriters := make([]io.Writer, parityShards)
+	for i := 0; i < parityShards; i++ {
+		parityWriters[i] = shardFiles[dataShards+i]
+	}
+
+	// Generate parity shards
+	err = enc.Encode(dataReaders, parityWriters)
+	if err != nil {
+		// Clean up files on error
+		for _, file := range shardFiles {
+			file.Close()
+			os.Remove(file.Name())
+		}
 		return domain.ObjectMetadata{}, nil, err
 	}
 
-	var hashes []domain.ShardStorage
+	// Calculate shard size and generate hashes
+	shardSize := (fileSize + int64(dataShards) - 1) / int64(dataShards)
 	table := crc64.MakeTable(crc64.ISO)
-	for _, shard := range shards {
-		crc := crc64.Checksum(shard, table)
+	var hashes []domain.ShardStorage
+
+	for _, file := range shardFiles {
+		file.Seek(0, 0)
+		hash := crc64.New(table)
+		_, err := io.Copy(hash, file)
+		if err != nil {
+			// Clean up files on error
+			for _, f := range shardFiles {
+				f.Close()
+				os.Remove(f.Name())
+			}
+			return domain.ObjectMetadata{}, nil, err
+		}
+
 		shardStorage := domain.ShardStorage{
-			Hash:        fmt.Sprintf("%016x", crc),
+			Hash:        fmt.Sprintf("%016x", hash.Sum64()),
 			StorageType: "",
 			BucketName:  "",
 			Key:         "",
 		}
 		hashes = append(hashes, shardStorage)
+		
+		// Reset file position for caller
+		file.Seek(0, 0)
 	}
 
 	meta := domain.ObjectMetadata{
-		OriginalSize: int64(len(data)),
-		ShardSize:    int64(len(shards[0])),
+		OriginalSize: fileSize,
+		ShardSize:    shardSize,
 		ParityShards: parityShards,
 		ShardHashes:  hashes,
 	}
 
-	return meta, shards, nil
+	return meta, shardFiles, nil
 }
 
 func ReconstructFile(shards [][]byte, meta domain.ObjectMetadata) ([]byte, error) {
@@ -138,7 +205,6 @@ func ReconstructFileFromFiles(shardFiles []*os.File, meta domain.ObjectMetadata)
 	return buf.Bytes(), nil
 }
 
-// ReconstructFileFromPaths reconstructs a file from shard file paths
 func ReconstructFileFromPaths(filePaths []string, meta domain.ObjectMetadata) ([]byte, error) {
 	totalShards := len(meta.ShardHashes)
 	dataShards := totalShards - meta.ParityShards
