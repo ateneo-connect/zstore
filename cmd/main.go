@@ -4,6 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"syscall"
 
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,6 +28,39 @@ var (
 	rawFileService *service.RawFileService
 	configPath     string
 )
+
+// setupCleanupHandler sets up signal handling for graceful cleanup
+func setupCleanupHandler() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	
+	go func() {
+		<-c
+		log.Info("Received interrupt signal, cleaning up temp files...")
+		cleanupTempFiles()
+		os.Exit(1)
+	}()
+}
+
+// cleanupTempFiles removes any leftover temp files
+func cleanupTempFiles() {
+	tempDir := os.TempDir()
+	patterns := []string{"shard_*.tmp", "reconstruct_*.tmp"}
+	
+	for _, pattern := range patterns {
+		matches, err := filepath.Glob(filepath.Join(tempDir, pattern))
+		if err != nil {
+			continue
+		}
+		
+		for _, match := range matches {
+			if strings.Contains(match, "shard_") || strings.Contains(match, "reconstruct_") {
+				os.Remove(match)
+				log.Debugf("Cleaned up temp file: %s", match)
+			}
+		}
+	}
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "zstore",
@@ -177,6 +214,9 @@ func addCommands() {
 }
 
 func main() {
+	// Setup cleanup handler for graceful shutdown
+	setupCleanupHandler()
+	
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

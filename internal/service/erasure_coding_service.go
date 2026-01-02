@@ -50,14 +50,23 @@ func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (
 	// Create temporary files for all shards
 	totalShards := dataShards + parityShards
 	shardFiles := make([]*os.File, totalShards)
-	for i := 0; i < totalShards; i++ {
-		file, err := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
+	
+	// Ensure cleanup on error
+	defer func() {
 		if err != nil {
-			// Clean up any created files
-			for j := 0; j < i; j++ {
-				shardFiles[j].Close()
-				os.Remove(shardFiles[j].Name())
+			for _, file := range shardFiles {
+				if file != nil {
+					file.Close()
+					os.Remove(file.Name())
+				}
 			}
+		}
+	}()
+	
+	for i := 0; i < totalShards; i++ {
+		file, createErr := os.CreateTemp("", fmt.Sprintf("shard_%d_*.tmp", i))
+		if createErr != nil {
+			err = createErr
 			return domain.ObjectMetadata{}, nil, err
 		}
 		shardFiles[i] = file
@@ -71,11 +80,6 @@ func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (
 
 	err = enc.Split(reader, dataWriters, fileSize)
 	if err != nil {
-		// Clean up files on error
-		for _, file := range shardFiles {
-			file.Close()
-			os.Remove(file.Name())
-		}
 		return domain.ObjectMetadata{}, nil, err
 	}
 
@@ -95,11 +99,6 @@ func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (
 	// Generate parity shards
 	err = enc.Encode(dataReaders, parityWriters)
 	if err != nil {
-		// Clean up files on error
-		for _, file := range shardFiles {
-			file.Close()
-			os.Remove(file.Name())
-		}
 		return domain.ObjectMetadata{}, nil, err
 	}
 
@@ -111,13 +110,9 @@ func ShardFile(reader io.Reader, dataShards, parityShards int, fileSize int64) (
 	for _, file := range shardFiles {
 		file.Seek(0, 0)
 		hash := crc64.New(table)
-		_, err := io.Copy(hash, file)
-		if err != nil {
-			// Clean up files on error
-			for _, f := range shardFiles {
-				f.Close()
-				os.Remove(f.Name())
-			}
+		_, hashErr := io.Copy(hash, file)
+		if hashErr != nil {
+			err = hashErr
 			return domain.ObjectMetadata{}, nil, err
 		}
 
@@ -228,18 +223,21 @@ func ReconstructFileStream(shardReaders []io.Reader, dest io.Writer, meta domain
 		tempFiles := make([]*os.File, totalShards)
 		outWriters := make([]io.Writer, totalShards)
 		
+		// Ensure cleanup of temp files on any exit path
+		defer func() {
+			for _, file := range tempFiles {
+				if file != nil {
+					file.Close()
+					os.Remove(file.Name())
+				}
+			}
+		}()
+		
 		// Create temp files for missing shards
 		for i := 0; i < totalShards; i++ {
 			if shardReaders[i] == nil {
 				tempFile, err := os.CreateTemp("", fmt.Sprintf("reconstruct_%d_*.tmp", i))
 				if err != nil {
-					// Clean up any created temp files
-					for j := 0; j < i; j++ {
-						if tempFiles[j] != nil {
-							tempFiles[j].Close()
-							os.Remove(tempFiles[j].Name())
-						}
-					}
 					return err
 				}
 				tempFiles[i] = tempFile
@@ -250,13 +248,6 @@ func ReconstructFileStream(shardReaders []io.Reader, dest io.Writer, meta domain
 		// Perform reconstruction
 		err = enc.Reconstruct(shardReaders, outWriters)
 		if err != nil {
-			// Clean up temp files on error
-			for _, file := range tempFiles {
-				if file != nil {
-					file.Close()
-					os.Remove(file.Name())
-				}
-			}
 			return err
 		}
 
@@ -267,16 +258,6 @@ func ReconstructFileStream(shardReaders []io.Reader, dest io.Writer, meta domain
 				shardReaders[i] = file
 			}
 		}
-
-		// Clean up temp files when done
-		defer func() {
-			for _, file := range tempFiles {
-				if file != nil {
-					file.Close()
-					os.Remove(file.Name())
-				}
-			}
-		}()
 	}
 
 	// Join the data shards to reconstruct original file

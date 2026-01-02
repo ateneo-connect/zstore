@@ -353,9 +353,8 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 	log.Debugf("%d shards downloaded successfully", successfulShards)
 
 	// Phase 4: Ensure we have enough shards for Reed-Solomon reconstruction
-	// If insufficient, return error rather than attempting reconstruction
+	// If insufficient, return error and cleanup temp files
 	if successfulShards < minShardsNeeded {
-		// Cleanup temp files on failure
 		for _, path := range tempFilePaths {
 			if path != "" {
 				os.Remove(path)
@@ -372,6 +371,7 @@ func (s *FileService) downloadShards(ctx context.Context, shardHashes []domain.S
 		}
 	}
 
+	// Return successful paths - caller is responsible for cleanup
 	return successfulPaths, nil
 }
 
