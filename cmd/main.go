@@ -56,12 +56,13 @@ var debugCmd = &cobra.Command{
 		fmt.Printf("Configuration:\n")
 		fmt.Printf("  Log Level: %s\n", cfg.LogLevel)
 		fmt.Printf("  DynamoDB Table: %s\n", cfg.DynamoDBTable)
-		fmt.Printf("  AWS Region: %s\n", cfg.AwsConfig.Region)
+		fmt.Printf("  DynamoDB Region: %s\n", cfg.DynamoDBRegion)
 		fmt.Printf("\nBuckets:\n")
 		for key, bucket := range cfg.Buckets {
 			fmt.Printf("  %s:\n", key)
 			fmt.Printf("    Name: %s\n", bucket.BucketName)
 			fmt.Printf("    Platform: %s\n", bucket.Platform)
+			fmt.Printf("    Region: %s\n", bucket.Region)
 		}
 	},
 }
@@ -150,8 +151,9 @@ func initRepositories(awsConfig aws.Config, gcsClient *storage.Client, buckets m
 func createRepository(factory *objectstore.ObjectRepositoryFactory, bucketKey string, bucketConfig config.BucketConfig) objectstore.ObjectRepository {
 	// Convert config format to factory format
 	repoConfig := objectstore.BucketConfig{
-		Name: bucketConfig.BucketName,
-		Type: objectstore.RepositoryType(bucketConfig.Platform), // "s3" or "gcs"
+		Name:   bucketConfig.BucketName,
+		Type:   objectstore.RepositoryType(bucketConfig.Platform), // "s3" or "gcs"
+		Region: bucketConfig.Region,
 	}
 
 	// Use factory to create appropriate repository (S3 or GCS)

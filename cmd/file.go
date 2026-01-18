@@ -137,17 +137,22 @@ var uploadRawCmd = &cobra.Command{
 		defer file.Close()
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		region, _ := cmd.Flags().GetString("region")
 		
 		// Route to appropriate repository
 		if strings.HasPrefix(url, "s3://") {
-			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet, objectstore.S3Type)
+			if region == "" {
+				fmt.Printf("Error: --region flag is required for S3 operations\n")
+				return
+			}
+			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet, objectstore.S3Type, region)
 			if err != nil {
 				fmt.Printf("Error uploading to S3: %v\n", err)
 				return
 			}
 			fmt.Printf("File uploaded successfully: %s -> s3://%s/%s\n", filePath, bucket, key)
 		} else {
-			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet, objectstore.GCSType)
+			err = rawFileService.UploadToRepository(context.Background(), bucket, key, file, quiet, objectstore.GCSType, "")
 			if err != nil {
 				fmt.Printf("Error uploading to GCS: %v\n", err)
 				return
@@ -231,6 +236,7 @@ var downloadRawCmd = &cobra.Command{
 		}
 
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		region, _ := cmd.Flags().GetString("region")
 		
 		// If output path is a directory, use the filename from the key
 		if stat, err := os.Stat(outputPath); err == nil && stat.IsDir() {
@@ -253,9 +259,13 @@ var downloadRawCmd = &cobra.Command{
 		
 		// Route to appropriate repository
 		if strings.HasPrefix(url, "s3://") {
-			err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, outFile, quiet, objectstore.S3Type)
+			if region == "" {
+				fmt.Printf("Error: --region flag is required for S3 operations\n")
+				return
+			}
+			err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, outFile, quiet, objectstore.S3Type, region)
 		} else {
-			err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, outFile, quiet, objectstore.GCSType)
+			err = rawFileService.DownloadFromRepository(context.Background(), bucket, key, outFile, quiet, objectstore.GCSType, "")
 		}
 		
 		if err != nil {
@@ -315,11 +325,17 @@ var deleteRawCmd = &cobra.Command{
 			return
 		}
 
+		region, _ := cmd.Flags().GetString("region")
+
 		// Route to appropriate repository
 		if strings.HasPrefix(url, "s3://") {
-			err = rawFileService.DeleteFromRepository(context.Background(), bucket, key, objectstore.S3Type)
+			if region == "" {
+				fmt.Printf("Error: --region flag is required for S3 operations\n")
+				return
+			}
+			err = rawFileService.DeleteFromRepository(context.Background(), bucket, key, objectstore.S3Type, region)
 		} else {
-			err = rawFileService.DeleteFromRepository(context.Background(), bucket, key, objectstore.GCSType)
+			err = rawFileService.DeleteFromRepository(context.Background(), bucket, key, objectstore.GCSType, "")
 		}
 		
 		if err != nil {
@@ -371,10 +387,13 @@ func init() {
 	uploadCmd.Flags().Int("parity-shards", 2, "Number of parity shards for erasure coding")
 	uploadCmd.Flags().Int("concurrency", 3, "Number of concurrent shard uploads")
 	uploadRawCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
+	uploadRawCmd.Flags().String("region", "", "AWS region for S3 bucket (required for S3)")
 	downloadCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
 	downloadCmd.Flags().Int("concurrency", 3, "Number of concurrent shard downloads")
 	downloadCmd.Flags().Bool("verify-integrity", false, "Verify shard integrity using CRC64 hashes")
 	downloadRawCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Suppress progress bars")
+	downloadRawCmd.Flags().String("region", "", "AWS region for S3 bucket (required for S3)")
+	deleteRawCmd.Flags().String("region", "", "AWS region for S3 bucket (required for S3)")
 	rootCmd.AddCommand(uploadCmd)
 	rootCmd.AddCommand(uploadRawCmd)
 	rootCmd.AddCommand(downloadCmd)

@@ -37,8 +37,9 @@ func setupTestServices(b *testing.B) (*service.FileService, *service.RawFileServ
 
 	for bucketKey, bucketConfig := range cfg.Buckets {
 		repoConfig := objectstore.BucketConfig{
-			Name: bucketConfig.BucketName,
-			Type: objectstore.RepositoryType(bucketConfig.Platform),
+			Name:   bucketConfig.BucketName,
+			Type:   objectstore.RepositoryType(bucketConfig.Platform),
+			Region: bucketConfig.Region,
 		}
 		repo, err := factory.CreateRepository(repoConfig)
 		if err != nil {
@@ -178,12 +179,12 @@ func BenchmarkRawFileService_UploadFile(b *testing.B) {
 						key := "benchmark/raw-test-file"
 						reader := bytes.NewReader(data)
 						
-						err := rawFileService.UploadToRepository(context.Background(), bucketConfig.BucketName, key, reader, true, objectstore.RepositoryType(bucketConfig.Platform))
+						err := rawFileService.UploadToRepository(context.Background(), bucketConfig.BucketName, key, reader, true, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 						if err != nil {
 							b.Fatalf("Raw UploadFile failed: %v", err)
 						}
 
-						rawFileService.DeleteFromRepository(context.Background(), bucketConfig.BucketName, key, objectstore.RepositoryType(bucketConfig.Platform))
+						rawFileService.DeleteFromRepository(context.Background(), bucketConfig.BucketName, key, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 					}
 				})
 			}
@@ -217,7 +218,7 @@ func BenchmarkRawFileService_DownloadFile(b *testing.B) {
 					rand.Read(data)
 					key := "benchmark/raw-download-test-file"
 					
-					err := rawFileService.UploadToRepository(context.Background(), bucketConfig.BucketName, key, bytes.NewReader(data), true, objectstore.RepositoryType(bucketConfig.Platform))
+					err := rawFileService.UploadToRepository(context.Background(), bucketConfig.BucketName, key, bytes.NewReader(data), true, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 					if err != nil {
 						b.Fatalf("Setup failed: %v", err)
 					}
@@ -231,7 +232,7 @@ func BenchmarkRawFileService_DownloadFile(b *testing.B) {
 						if err != nil {
 							b.Fatalf("Failed to create temp file: %v", err)
 						}
-						err = rawFileService.DownloadFromRepository(context.Background(), bucketConfig.BucketName, key, tempFile, true, objectstore.RepositoryType(bucketConfig.Platform))
+						err = rawFileService.DownloadFromRepository(context.Background(), bucketConfig.BucketName, key, tempFile, true, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 						tempFile.Close()
 						os.Remove(tempFile.Name())
 						if err != nil {
@@ -239,7 +240,7 @@ func BenchmarkRawFileService_DownloadFile(b *testing.B) {
 						}
 					}
 
-					rawFileService.DeleteFromRepository(context.Background(), bucketConfig.BucketName, key, objectstore.RepositoryType(bucketConfig.Platform))
+					rawFileService.DeleteFromRepository(context.Background(), bucketConfig.BucketName, key, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 				})
 			}
 		})
@@ -262,12 +263,12 @@ func BenchmarkRawFileService_CrossProvider_Comparison(b *testing.B) {
 				key := "benchmark/cross-provider-test"
 				reader := bytes.NewReader(data)
 				
-				err := rawFileService.UploadToRepository(context.Background(), bucketConfig.BucketName, key, reader, true, objectstore.RepositoryType(bucketConfig.Platform))
+				err := rawFileService.UploadToRepository(context.Background(), bucketConfig.BucketName, key, reader, true, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 				if err != nil {
 					b.Fatalf("Raw UploadFile failed: %v", err)
 				}
 
-				rawFileService.DeleteFromRepository(context.Background(), bucketConfig.BucketName, key, objectstore.RepositoryType(bucketConfig.Platform))
+				rawFileService.DeleteFromRepository(context.Background(), bucketConfig.BucketName, key, objectstore.RepositoryType(bucketConfig.Platform), bucketConfig.Region)
 			}
 		})
 	}

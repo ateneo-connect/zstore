@@ -13,14 +13,20 @@ Create a `config.yaml` file:
 log_level: info
 dynamodb_table: object_metadata
 
-# Multi-bucket configuration
+# DynamoDB region (required)
+# Can also be set via AWS_REGION or AWS_DEFAULT_REGION environment variables
+dynamodb_region: us-east-1
+
+# Multi-bucket configuration with per-bucket regions
 buckets:
   primary:
     bucket_name: my-gcs-bucket
     platform: gcs
+    # region not needed for GCS
   secondary:
     bucket_name: my-s3-bucket
     platform: s3
+    region: us-west-2  # Required for S3 buckets
 ```
 
 ### 2. Environment Setup
@@ -65,11 +71,14 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 **Upload Raw Files (without erasure coding)**
 ```bash
-# Upload without erasure coding (raw file)
-./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt
+# Upload without erasure coding (raw file) - region required for S3
+./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt --region us-west-2
+
+# Upload raw file to GCS (no region needed)
+./zstore upload-raw /path/to/file.txt gs://my-bucket/path/file.txt
 
 # Upload raw file in quiet mode
-./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt --quiet
+./zstore upload-raw /path/to/file.txt s3://my-bucket/path/file.txt --region us-west-2 --quiet
 ```
 
 #### Download Commands
@@ -88,11 +97,14 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 **Download Raw Files (without erasure coding)**
 ```bash
-# Download without erasure coding (raw file)
-./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt
+# Download without erasure coding (raw file) - region required for S3
+./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt --region us-west-2
+
+# Download raw file from GCS (no region needed)
+./zstore download-raw gs://my-bucket/path/file.txt /path/to/output.txt
 
 # Download raw file in quiet mode
-./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt --quiet
+./zstore download-raw s3://my-bucket/path/file.txt /path/to/output.txt --region us-west-2 --quiet
 ```
 
 #### Delete Commands
@@ -105,8 +117,11 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 
 **Delete Raw Files**
 ```bash
-# Delete a raw file
-./zstore delete-raw s3://my-bucket/path/file.txt
+# Delete a raw file from S3 - region required
+./zstore delete-raw s3://my-bucket/path/file.txt --region us-west-2
+
+# Delete a raw file from GCS (no region needed)
+./zstore delete-raw gs://my-bucket/path/file.txt
 ```
 
 #### List Commands
@@ -134,9 +149,9 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 - `--verify-integrity`: Enable CRC64 hash verification of downloaded shards (default: false)
 
 ### Raw Operations
-- `upload-raw`: Upload files directly to S3 without erasure coding (uses s3:// URLs, supports --quiet)
-- `download-raw`: Download files directly from S3 without erasure coding (uses s3:// URLs, supports --quiet)
-- `delete-raw`: Delete files directly from S3 without erasure coding (uses s3:// URLs)
+- `upload-raw`: Upload files directly to S3/GCS without erasure coding (uses s3:// or gs:// URLs, --region required for S3)
+- `download-raw`: Download files directly from S3/GCS without erasure coding (uses s3:// or gs:// URLs, --region required for S3)
+- `delete-raw`: Delete files directly from S3/GCS without erasure coding (uses s3:// or gs:// URLs, --region required for S3)
 
 ## Configuration
 
@@ -148,6 +163,10 @@ The `config.yaml` file supports:
 # Logging level (debug, info, warn, error)
 log_level: info
 
+# DynamoDB region (required)
+# Priority: config.yaml > AWS_REGION env > AWS_DEFAULT_REGION env
+dynamodb_region: us-east-1
+
 # DynamoDB table for metadata storage
 dynamodb_table: object_metadata
 
@@ -155,10 +174,12 @@ dynamodb_table: object_metadata
 buckets:
   bucket_key_1:
     bucket_name: actual-bucket-name
-    platform: s3  # or gcs
+    platform: s3
+    region: us-west-2  # Required for S3 buckets
   bucket_key_2:
     bucket_name: another-bucket
     platform: gcs
+    # region not needed for GCS
 ```
 
 ### Supported Platforms

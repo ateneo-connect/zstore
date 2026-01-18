@@ -38,11 +38,11 @@ func NewRawFileService(factory *objectstore.ObjectRepositoryFactory) *RawFileSer
 }
 
 // UploadToRepository uploads a file directly to a repository without erasure coding
-func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key string, reader io.Reader, quiet bool, providerType objectstore.RepositoryType) error {
+func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key string, reader io.Reader, quiet bool, providerType objectstore.RepositoryType, region string) error {
 	log.Debugf("Uploading raw file %s to bucket %s", key, bucketName)
 
-	// Create repository for this bucket with specified provider type
-	repo, err := r.createRepositoryForBucket(bucketName, providerType)
+	// Create repository for this bucket with specified provider type and region
+	repo, err := r.createRepositoryForBucket(bucketName, providerType, region)
 	if err != nil {
 		return err
 	}
@@ -52,11 +52,11 @@ func (r *RawFileService) UploadToRepository(ctx context.Context, bucketName, key
 }
 
 // DownloadFromRepository downloads a file directly from a repository without erasure coding
-func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, dest io.WriterAt, quiet bool, providerType objectstore.RepositoryType) error {
+func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName, key string, dest io.WriterAt, quiet bool, providerType objectstore.RepositoryType, region string) error {
 	log.Debugf("Downloading raw file %s from bucket %s", key, bucketName)
 
-	// Create repository for this bucket with specified provider type
-	repo, err := r.createRepositoryForBucket(bucketName, providerType)
+	// Create repository for this bucket with specified provider type and region
+	repo, err := r.createRepositoryForBucket(bucketName, providerType, region)
 	if err != nil {
 		return err
 	}
@@ -65,11 +65,11 @@ func (r *RawFileService) DownloadFromRepository(ctx context.Context, bucketName,
 }
 
 // DeleteFromRepository deletes a file directly from a repository without erasure coding
-func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, key string, providerType objectstore.RepositoryType) error {
+func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, key string, providerType objectstore.RepositoryType, region string) error {
 	log.Debugf("Deleting raw file %s from bucket %s", key, bucketName)
 
-	// Create repository for this bucket with specified provider type
-	repo, err := r.createRepositoryForBucket(bucketName, providerType)
+	// Create repository for this bucket with specified provider type and region
+	repo, err := r.createRepositoryForBucket(bucketName, providerType, region)
 	if err != nil {
 		return err
 	}
@@ -77,11 +77,12 @@ func (r *RawFileService) DeleteFromRepository(ctx context.Context, bucketName, k
 	return repo.Delete(ctx, key)
 }
 
-// createRepositoryForBucket creates a repository based on bucket name and provider type
-func (r *RawFileService) createRepositoryForBucket(bucketName string, providerType objectstore.RepositoryType) (objectstore.ObjectRepository, error) {
+// createRepositoryForBucket creates a repository based on bucket name, provider type, and region
+func (r *RawFileService) createRepositoryForBucket(bucketName string, providerType objectstore.RepositoryType, region string) (objectstore.ObjectRepository, error) {
 	config := objectstore.BucketConfig{
-		Name: bucketName,
-		Type: providerType,
+		Name:   bucketName,
+		Type:   providerType,
+		Region: region,
 	}
 	return r.factory.CreateRepository(config)
 }

@@ -4,18 +4,21 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"os"
 
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/zzenonn/zstore/internal/errors"
 )
 
 // BucketConfig represents a storage bucket configuration
 type BucketConfig struct {
 	BucketName string `yaml:"bucket_name"`
 	Platform   string `yaml:"platform"`
+	Region     string `yaml:"region"` // Required for S3, optional for GCS
 }
 
 // Config holds the application configuration
@@ -23,10 +26,10 @@ type Config struct {
 	LogLevel        string `yaml:"log_level"`
 	ECDSAPrivateKey *ecdsa.PrivateKey
 	ECDSAPublicKey  *ecdsa.PublicKey
-	// AwsConfig: AWS SDK uses a shared configuration object that contains
-	// credentials, region, retry policies, etc. Multiple AWS services
-	// (S3, DynamoDB, etc.) are created from this single config.
+	// AwsConfig: AWS SDK configuration for DynamoDB
 	AwsConfig aws.Config
+	// DynamoDBRegion: AWS region for DynamoDB table
+	DynamoDBRegion  string `yaml:"dynamodb_region"`
 	// GcsClient: Google Cloud SDK uses individual service clients that
 	// handle their own configuration internally via environment variables,
 	// service account files, or metadata service. No shared config needed.
@@ -52,7 +55,7 @@ func LoadConfig(configPath string, rootCmd *cobra.Command) (*Config, error) {
 		return nil, err
 	}
 
-	awsConfig, err := loadAWSConfig()
+	awsConfig, dynamoDBRegion, err := loadAWSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -65,11 +68,12 @@ func LoadConfig(configPath string, rootCmd *cobra.Command) (*Config, error) {
 	buckets := parseBuckets()
 
 	return &Config{
-		LogLevel:      viper.GetString("log_level"),
-		AwsConfig:     awsConfig,
-		GcsClient:     gcsClient,
-		DynamoDBTable: viper.GetString("dynamodb_table"),
-		Buckets:       buckets,
+		LogLevel:       viper.GetString("log_level"),
+		AwsConfig:      awsConfig,
+		DynamoDBRegion: dynamoDBRegion,
+		GcsClient:      gcsClient,
+		DynamoDBTable:  viper.GetString("dynamodb_table"),
+		Buckets:        buckets,
 	}, nil
 }
 
@@ -112,13 +116,33 @@ func setDefaults() {
 	})
 }
 
-// loadAWSConfig loads AWS SDK configuration
-func loadAWSConfig() (aws.Config, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background())
-	if err != nil {
-		return aws.Config{}, fmt.Errorf("unable to load AWS SDK config: %v", err)
+// loadAWSConfig loads AWS SDK configuration for DynamoDB with explicit region handling
+func loadAWSConfig() (aws.Config, string, error) {
+	// Priority order for DynamoDB region configuration:
+	// 1. config.yaml: dynamodb_region
+	// 2. Environment: AWS_REGION
+	// 3. Environment: AWS_DEFAULT_REGION
+	// 4. Error if none found
+	
+	region := viper.GetString("dynamodb_region")
+	if region == "" {
+		region = os.Getenv("AWS_REGION")
 	}
-	return cfg, nil
+	if region == "" {
+		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" {
+		return aws.Config{}, "", errors.ErrAWSRegionNotConfigured
+	}
+	
+	cfg, err := awsconfig.LoadDefaultConfig(
+		context.Background(),
+		awsconfig.WithRegion(region),
+	)
+	if err != nil {
+		return aws.Config{}, "", fmt.Errorf("unable to load AWS SDK config: %v", err)
+	}
+	return cfg, region, nil
 }
 
 // loadGCSClient loads Google Cloud Storage client
@@ -140,6 +164,7 @@ func parseBuckets() map[string]BucketConfig {
 			bucketsMap[key] = BucketConfig{
 				BucketName: getString(bucketMap, "bucket_name", key),
 				Platform:   getString(bucketMap, "platform", "s3"),
+				Region:     getString(bucketMap, "region", ""),
 			}
 		}
 	}
