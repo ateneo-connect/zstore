@@ -33,16 +33,16 @@ const (
 
 // BucketConfig holds configuration for a storage bucket
 type BucketConfig struct {
-	Name string
-	Type RepositoryType
-	// Add provider-specific config fields as needed
+	Name   string
+	Type   RepositoryType
+	Region string // Required for S3, optional for GCS
 }
 
 // ObjectRepositoryFactory creates object repository instances
 type ObjectRepositoryFactory struct {
-	awsConfig aws.Config
-	gcsClient *storage.Client
-	// Add other provider configs as needed
+	awsConfig   aws.Config
+	gcsClient   *storage.Client
+	s3Clients   map[string]*s3.Client // Cache S3 clients by region
 }
 
 // NewObjectRepositoryFactory creates a new factory
@@ -50,6 +50,7 @@ func NewObjectRepositoryFactory(awsConfig aws.Config, gcsClient *storage.Client)
 	return &ObjectRepositoryFactory{
 		awsConfig: awsConfig,
 		gcsClient: gcsClient,
+		s3Clients: make(map[string]*s3.Client),
 	}
 }
 
@@ -57,7 +58,13 @@ func NewObjectRepositoryFactory(awsConfig aws.Config, gcsClient *storage.Client)
 func (f *ObjectRepositoryFactory) CreateRepository(config BucketConfig) (ObjectRepository, error) {
 	switch config.Type {
 	case S3Type:
-		client := s3.NewFromConfig(f.awsConfig)
+		if config.Region == "" {
+			return nil, fmt.Errorf("region is required for S3 bucket: %s", config.Name)
+		}
+		client, err := f.getS3Client(config.Region)
+		if err != nil {
+			return nil, err
+		}
 		repo := NewS3ObjectRepository(client, config.Name)
 		return &repo, nil
 	case GCSType:
@@ -69,6 +76,20 @@ func (f *ObjectRepositoryFactory) CreateRepository(config BucketConfig) (ObjectR
 	default:
 		return nil, fmt.Errorf("unsupported repository type: %s", config.Type)
 	}
+}
+
+// getS3Client gets or creates an S3 client for the specified region
+func (f *ObjectRepositoryFactory) getS3Client(region string) (*s3.Client, error) {
+	if client, exists := f.s3Clients[region]; exists {
+		return client, nil
+	}
+	
+	// Create new S3 client for this region
+	cfg := f.awsConfig.Copy()
+	cfg.Region = region
+	client := s3.NewFromConfig(cfg)
+	f.s3Clients[region] = client
+	return client, nil
 }
 
 // ParseBucketConfig parses bucket configuration from string

@@ -12,8 +12,8 @@ var (
 	ErrInsufficientShards    = errors.New("insufficient shards available for reconstruction")
 	ErrEmptyFile             = errors.New("cannot upload empty file")
 	ErrFileIntegrityCheck    = errors.New("file integrity check failed")
-	ErrAWSRegionNotConfigured = errors.New(`AWS region not configured. Please set region using one of:
-1. config.yaml: aws_region: us-east-1
+	ErrAWSRegionNotConfigured = errors.New(`DynamoDB region not configured. Please set region using one of:
+1. config.yaml: dynamodb_region: us-east-1
 2. Environment: export AWS_REGION=us-east-1
 3. Environment: export AWS_DEFAULT_REGION=us-east-1
 
