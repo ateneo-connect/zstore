@@ -13,6 +13,10 @@ Create a `config.yaml` file:
 log_level: info
 dynamodb_table: object_metadata
 
+# AWS region (required for S3 and DynamoDB)
+# Can also be set via AWS_REGION or AWS_DEFAULT_REGION environment variables
+aws_region: us-east-1
+
 # Multi-bucket configuration
 buckets:
   primary:
@@ -147,6 +151,10 @@ The `config.yaml` file supports:
 ```yaml
 # Logging level (debug, info, warn, error)
 log_level: info
+
+# AWS region (required for S3 and DynamoDB)
+# Priority: config.yaml > AWS_REGION env > AWS_DEFAULT_REGION env
+aws_region: us-east-1
 
 # DynamoDB table for metadata storage
 dynamodb_table: object_metadata

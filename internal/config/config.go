@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"os"
 
 	"cloud.google.com/go/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"github.com/zzenonn/zstore/internal/errors"
 )
 
 // BucketConfig represents a storage bucket configuration
@@ -27,6 +29,8 @@ type Config struct {
 	// credentials, region, retry policies, etc. Multiple AWS services
 	// (S3, DynamoDB, etc.) are created from this single config.
 	AwsConfig aws.Config
+	// AwsRegion: Explicitly configured AWS region
+	AwsRegion       string `yaml:"aws_region"`
 	// GcsClient: Google Cloud SDK uses individual service clients that
 	// handle their own configuration internally via environment variables,
 	// service account files, or metadata service. No shared config needed.
@@ -52,7 +56,7 @@ func LoadConfig(configPath string, rootCmd *cobra.Command) (*Config, error) {
 		return nil, err
 	}
 
-	awsConfig, err := loadAWSConfig()
+	awsConfig, awsRegion, err := loadAWSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -67,6 +71,7 @@ func LoadConfig(configPath string, rootCmd *cobra.Command) (*Config, error) {
 	return &Config{
 		LogLevel:      viper.GetString("log_level"),
 		AwsConfig:     awsConfig,
+		AwsRegion:     awsRegion,
 		GcsClient:     gcsClient,
 		DynamoDBTable: viper.GetString("dynamodb_table"),
 		Buckets:       buckets,
@@ -112,13 +117,33 @@ func setDefaults() {
 	})
 }
 
-// loadAWSConfig loads AWS SDK configuration
-func loadAWSConfig() (aws.Config, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background())
-	if err != nil {
-		return aws.Config{}, fmt.Errorf("unable to load AWS SDK config: %v", err)
+// loadAWSConfig loads AWS SDK configuration with explicit region handling
+func loadAWSConfig() (aws.Config, string, error) {
+	// Priority order for region configuration:
+	// 1. config.yaml: aws_region
+	// 2. Environment: AWS_REGION
+	// 3. Environment: AWS_DEFAULT_REGION
+	// 4. Error if none found
+	
+	region := viper.GetString("aws_region")
+	if region == "" {
+		region = os.Getenv("AWS_REGION")
 	}
-	return cfg, nil
+	if region == "" {
+		region = os.Getenv("AWS_DEFAULT_REGION")
+	}
+	if region == "" {
+		return aws.Config{}, "", errors.ErrAWSRegionNotConfigured
+	}
+	
+	cfg, err := awsconfig.LoadDefaultConfig(
+		context.Background(),
+		awsconfig.WithRegion(region),
+	)
+	if err != nil {
+		return aws.Config{}, "", fmt.Errorf("unable to load AWS SDK config: %v", err)
+	}
+	return cfg, region, nil
 }
 
 // loadGCSClient loads Google Cloud Storage client
